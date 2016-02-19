@@ -2,14 +2,13 @@ from collections import defaultdict
 from itertools import product
 from math import sqrt, floor, ceil
 
-import numpy as np
-
 from PyQt4.QtCore import Qt, QSize
 from PyQt4.QtGui import (QGraphicsScene, QGraphicsView, QColor, QPen, QBrush,
                          QDialog, QApplication, QSizePolicy)
 
 import Orange
 from Orange.data import Table
+from Orange.data.filter import Values, FilterDiscrete
 from Orange.data.sql.table import SqlTable, LARGE_TABLE, DEFAULT_SAMPLE_TIME
 from Orange.statistics.contingency import get_contingency
 from Orange.widgets import gui
@@ -169,20 +168,23 @@ class OWSieveDiagram(OWWidget):
             self.send("Selection", None)
             return
 
-        selected = np.zeros(len(self.data), dtype=bool)
-        col_x = self.data.get_column_view(self.data.domain.index(self.attrX))[0]
-        col_y = self.data.get_column_view(self.data.domain.index(self.attrY))[0]
+        filters = []
         for i, area in enumerate(self.areas):
             if i in self.selection:
                 width = 4
                 val_x, val_y = area.value_pair
-                selected |= ((col_x == val_x) & (col_y == val_y))
+                attrX = self.data.domain[self.attrX]
+                attrY = self.data.domain[self.attrY]
+                f1 = FilterDiscrete(attrX, (val_x,))
+                f2 = FilterDiscrete(attrY, (val_y,))
+                filters.append(Values([f1, f2]))
             else:
                 width = 1
             pen = area.pen()
             pen.setWidth(width)
             area.setPen(pen)
-        self.send("Selection", self.data[selected])
+        selection = Values(filters, conjunction=False)(self.data)
+        self.send("Selection", selection)
 
     # -----------------------------------------------------------------------
     # Everything from here on is ancient and has been changed only according
