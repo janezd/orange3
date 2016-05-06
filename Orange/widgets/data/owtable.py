@@ -77,26 +77,30 @@ class RichTableDecorator(QSortFilterProxyModel):
 
         super().setSourceModel(source)
 
-    def data(self, index, role=Qt.DisplayRole,
-             # for faster local lookup
-             _BarRole=gui.TableBarItem.BarRole):
-        if role == _BarRole and self._continuous[index.column()]:
-            val = super().data(index, TableModel.ValueRole)
-            if val is None or isnan(val):
-                return None
+    DATA_PROCEDURE = {
+        gui.TableBarItem.BarRole:
+            ((TableModel.ValueRole, TableModel.VariableStatsRole),
+             lambda is_cont, val, dist:
+                 is_cont and
+                 val is not None and
+                 dist is not None and
+                 not isnan(val) and
+                 dist.max > dist.min and
+                 (val - dist.min) / (dist.max - dist.min)),
+        Qt.TextAlignmentRole:
+            ((),
+             lambda is_cont: is_cont and Qt.AlignRight | Qt.AlignVCenter),
+        IntSortRole:
+            ((Qt.DisplayRole,),
+             lambda _, val: int(val.isdigit() and val)),
+    }.get
 
-            dist = super().data(index, TableModel.VariableStatsRole)
-            if dist is not None and dist.max > dist.min:
-                return (val - dist.min) / (dist.max - dist.min)
-            else:
-                return None
-        elif role == Qt.TextAlignmentRole and self._continuous[index.column()]:
-            return Qt.AlignRight | Qt.AlignVCenter
-        elif role == self.IntSortRole:
-            val = super().data(index, Qt.DisplayRole)
-            return int(val) if val.isdigit() else -1
-        else:
-            return super().data(index, role)
+    def data(self, index, role=Qt.DisplayRole):
+        roles, get_value = self.DATA_PROCEDURE(role, ((), (lambda *_: False)))
+        superdata = super().data
+        args = [superdata(index, role) for role in roles]
+        value = get_value(self._continuous[index.column()], *args)
+        return value if value is not False else superdata(index, role)
 
     def headerData(self, section, orientation, role):
         if self.sourceModel() is None:
