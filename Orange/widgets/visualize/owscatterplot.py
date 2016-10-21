@@ -483,6 +483,13 @@ class OWScatterPlot(OWWidget):
         self.graph.plot_widget.getViewBox().deleteLater()
         self.graph.plot_widget.clear()
 
+    @classmethod
+    def migrate_settings(cls):
+        cls.settingsHandler.migrate_str_to_variable(
+            ["attr_x", "attr_y",
+             "graph.attr_color", "graph.attr_label",
+             "graph.attr_shape", "graph.attr_size"])
+
 
 def test_main(argv=None):
     import sys
