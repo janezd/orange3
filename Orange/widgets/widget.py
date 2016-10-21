@@ -70,7 +70,7 @@ class WidgetMetaClass(type(QDialog)):
                             "settingsFromWidgetCallback")
 
         cls.settingsHandler = SettingsHandler.create(cls, template=cls.settingsHandler)
-
+        cls.migrate_settings()
         return cls
 
 
@@ -536,6 +536,10 @@ class OWWidget(QDialog, Report, ProgressBarMixin, WidgetMessagesMixin,
         when the widget is deleted.
         """
         self.settingsHandler.update_defaults(self)
+
+    @classmethod
+    def migrate_settings(cls):
+        pass
 
     def onDeleteWidget(self):
         """

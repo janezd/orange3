@@ -1065,6 +1065,12 @@ class DomainContextHandler(ContextHandler):
             return True
         return self._var_exists(setting, item, attrs, metas)
 
+    def migrate_str_to_variable(self, names):
+        for context in self.global_contexts:
+            for name in names:
+                if 0 <= context.get(name, 101) <= 100:
+                    context[name] += 100
+
 
 class IncompatibleContext(Exception):
     """Raised when a required variable in context is not available in data."""
