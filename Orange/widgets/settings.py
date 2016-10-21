@@ -438,6 +438,7 @@ class SettingsHandler:
         if provider is self.provider:
             data = self._add_defaults(data)
 
+        instance.migrate_settings(data)
         provider.initialize(instance, data)
 
     def _select_provider(self, instance):
@@ -1065,11 +1066,15 @@ class DomainContextHandler(ContextHandler):
             return True
         return self._var_exists(setting, item, attrs, metas)
 
-    def migrate_str_to_variable(self, names):
-        for context in self.global_contexts:
-            for name in names:
-                if 0 <= context.get(name, 101) <= 100:
-                    context[name] += 100
+    @staticmethod
+    def migrate_str_to_variable(context, names):
+        values = context.values
+        print("VV", values)
+        for name in names:
+            if name in values:
+                var, vartype = values[name]
+                if 0 <= vartype <= 100:
+                    values[name] += (var, 100 + vartype)
 
 
 class IncompatibleContext(Exception):

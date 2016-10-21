@@ -26,8 +26,8 @@ from Orange.widgets.utils.colorpalette import (ColorPaletteGenerator,
 from Orange.widgets.utils.plot import \
     OWPalette, OWPlotGUI, SELECT, PANNING, ZOOMING
 from Orange.widgets.utils.scaling import ScaleScatterPlotData
-from Orange.widgets.settings import Setting, ContextSetting
-
+from Orange.widgets.settings import Setting, ContextSetting, \
+    DomainContextHandler
 
 # TODO Move utility classes to another module, so they can be used elsewhere
 
@@ -555,6 +555,13 @@ class OWScatterPlotGraph(gui.OWComponent, ScaleScatterPlotData):
         self.subset_indices = set(e.id for e in subset_data) if subset_data else None
 
         self.set_data(data, **args)
+
+    @classmethod
+    def migrate_settings(cls, settings):
+        if settings is None:
+            return
+        DomainContextHandler.migrate_str_to_variable(
+            settings, ["attr_color", "attr_label", "attr_shape", "attr_size"])
 
     def _clear_plot_widget(self):
         self.remove_legend()

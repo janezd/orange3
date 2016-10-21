@@ -484,8 +484,14 @@ class OWScatterPlot(OWWidget):
         self.graph.plot_widget.clear()
 
     @classmethod
-    def migrate_settings(cls):
+    def migrate_context_settings(cls, settings):
+        for context in settings["context_settings"]:
+            cls.migrate_settings(context)
+
+    @classmethod
+    def migrate_settings(cls, settings):
         cls.settingsHandler.migrate_str_to_variable(
+            settings,
             ["attr_x", "attr_y",
              "graph.attr_color", "graph.attr_label",
              "graph.attr_shape", "graph.attr_size"])
