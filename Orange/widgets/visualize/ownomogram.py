@@ -616,6 +616,7 @@ class OWNomogram(OWWidget):
     n_attributes = Setting(10)
     sort_index = Setting(SortBy.ABSOLUTE)
     cont_feature_dim_index = Setting(0)
+    show_predictions = Setting(True)
 
     graph_name = "scene"
 
@@ -652,7 +653,10 @@ class OWNomogram(OWWidget):
         box = gui.vBox(self.controlArea, "Target class")
         self.class_combo = gui.comboBox(
             box, self, "target_class_index", callback=self._class_combo_changed,
-            contentsLength=12)
+            contentsLength=12, addSpace=8)
+        gui.checkBox(
+            box, self, "show_predictions", "Show prediction",
+            callback=self._show_predictions_changed)
         self.norm_check = gui.checkBox(
             box, self, "normalize_probabilities", "Normalize probabilities",
             hidden=True, callback=self._norm_check_changed,
@@ -1044,6 +1048,14 @@ class OWNomogram(OWWidget):
             totals[i] = total
         return totals
 
+    def _show_predictions_changed(self):
+        if not (len(self.points) and len(self.feature_items)):
+            return
+        action = QGraphicsEllipseItem.show if self.show_predictions else QGraphicsEllipseItem.hide
+        for item in self.feature_items:
+            action(item.dot)
+        action(item.dot.probs_dot)
+
     def set_feature_marker_values(self):
         if not (len(self.points) and len(self.feature_items)):
             return
@@ -1075,6 +1087,7 @@ class OWNomogram(OWWidget):
                     if attr.is_discrete else \
                     self.log_reg_coeffs_orig[i][cls_index][0] * feature_val
             self.feature_marker_values.append(value)
+        self._show_predictions_changed()
 
     def clear_scene(self):
         self.feature_items = []
