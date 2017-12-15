@@ -1,6 +1,9 @@
 # Test methods with long descriptive names can omit docstrings
 # pylint: disable=missing-docstring
-from Orange.data import Table, Domain, DiscreteVariable, ContinuousVariable
+import numpy as np
+
+from Orange.data import Table, Domain, \
+    DiscreteVariable, ContinuousVariable, StringVariable
 from Orange.preprocess import Continuize
 from Orange.widgets.visualize.owheatmap import OWHeatMap
 from Orange.widgets.tests.base import WidgetTest, WidgetOutputsTestMixin, datasets
@@ -117,3 +120,37 @@ class TestOWHeatMap(WidgetTest, WidgetOutputsTestMixin):
         table = datasets.data_one_column_nans()
         self.widget.controls.merge_kmeans.setChecked(True)
         self.send_signal(self.widget.Inputs.data, table)
+
+    def test_default_annotation(self):
+        """Test priorities for assigning default annotation variable"""
+        d1 = DiscreteVariable("a", values=["foo"])
+        d2 = DiscreteVariable("b", values=["bar"])
+        c1 = ContinuousVariable("c")
+        c2 = ContinuousVariable("d")
+        s1 = StringVariable("e")
+        s2 = StringVariable("f")
+        widget = self.widget
+
+        def set_data(attrs, classes=(), metas=()):
+            table = Table.from_numpy(
+                Domain(attrs, classes, metas),
+                np.zeros((1, len(attrs)), dtype=float),
+                np.zeros((1, 1 if classes else 0), dtype=float),
+                np.array([[np.nan] * len(metas)])
+            )
+            self.send_signal(widget.Inputs.data, table)
+
+        set_data([c1, c2], d1, [d2, s1, s2])
+        self.assertIs(widget.annotation_var, s1)
+
+        set_data([c1, c2], d1, [d2])
+        self.assertIs(widget.annotation_var, d1)
+
+        set_data([c1, d2], c1, [d1])
+        self.assertIs(widget.annotation_var, d1)
+
+        set_data([d1, d2])
+        self.assertIs(widget.annotation_var, d1)
+
+        set_data([c1, c2])
+        self.assertIsNone(widget.annotation_var)

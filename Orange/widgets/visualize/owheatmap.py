@@ -36,6 +36,7 @@ from Orange.widgets.utils.annotated_data import (create_annotated_table,
 from Orange.widgets import widget, gui, settings
 from Orange.widgets.unsupervised.owhierarchicalclustering import \
     DendrogramWidget
+from Orange.widgets.utils.itemmodels import DomainModel
 from Orange.widgets.widget import Msg, Input, Output
 
 
@@ -413,7 +414,7 @@ class OWHeatMap(widget.OWWidget):
     # Display legend
     legend = settings.Setting(True)
     # Annotations
-    annotation_index = settings.ContextSetting(0)
+    annotation_var = settings.ContextSetting(None)
     # Stored color palette settings
     color_settings = settings.Setting(None)
     user_palettes = settings.Setting([])
@@ -469,7 +470,6 @@ class OWHeatMap(widget.OWWidget):
         #: the indices which merge the input_data into the heatmap row i
         self.merge_indices = None
 
-        self.annotation_vars = ['(None)']
         self.__rows_cache = {}
         self.__columns_cache = {}
 
@@ -541,8 +541,11 @@ class OWHeatMap(widget.OWWidget):
 
         annotbox = gui.vBox(box, "Row Annotations", addSpace=False)
         annotbox.setFlat(True)
-        self.annotations_cb = gui.comboBox(annotbox, self, "annotation_index",
-                                           items=self.annotation_vars,
+        self.annotation_model = DomainModel(
+            valid_types=(DiscreteVariable, StringVariable),
+            placeholder="(None)", separators=False)
+        self.annotations_cb = gui.comboBox(annotbox, self, "annotation_var",
+                                           model=self.annotation_model,
                                            callback=self.update_annotations)
 
         posbox = gui.vBox(box, "Column Labels Position", addSpace=False)
@@ -620,9 +623,7 @@ class OWHeatMap(widget.OWWidget):
         self.effective_data = None
         self.kmeans_model = None
         self.merge_indices = None
-        self.annotations_cb.clear()
-        self.annotations_cb.addItem('(None)')
-        self.annotation_vars = ['(None)']
+        self.annotation_model.set_domain(None)
         self.clear_scene()
         self.selected_rows = []
         self.__columns_cache.clear()
@@ -697,18 +698,28 @@ class OWHeatMap(widget.OWWidget):
         self.input_data = input_data
 
         if data is not None:
-            variables = self.data.domain.class_vars + self.data.domain.metas
-            variables = [var for var in variables
-                         if isinstance(var, (DiscreteVariable, StringVariable))]
-            self.annotation_vars.extend(variables)
-
-            for var in variables:
-                self.annotations_cb.addItem(*gui.attributeItem(var))
-
+            self.annotation_model.set_domain(data.domain)
+            self.annotation_var = self.get_default_annotation()
             self.openContext(self.data)
-            if self.annotation_index >= len(self.annotation_vars):
-                self.annotation_index = 0
+            self.migrate_annotation_index()
         self.update_heatmaps()
+
+    def get_default_annotation(self):
+        for var in self.data.domain.metas:
+            if isinstance(var, StringVariable):
+                return var
+        if len(self.annotation_model) > 1:
+            return self.annotation_model[1]
+
+    def migrate_annotation_index(self):
+        """
+        Migrate `annotation_index` into `annotation_var`. This cannot be done
+        through usual migrations because it requires a domain.
+        """
+        ann_idx, _ = self.current_context.values.pop("annotation_index",
+                                                     (None, None))
+        if isinstance(ann_idx, int) and ann_idx < len(self.annotation_model):
+            self.annotation_var = self.annotation_model[ann_idx]
 
     def update_heatmaps(self):
         if self.data is not None:
@@ -1356,13 +1367,7 @@ class OWHeatMap(widget.OWWidget):
 
     def update_annotations(self):
         if self.input_data is not None:
-            if self.annotation_vars:
-                var = self.annotation_vars[self.annotation_index]
-                if var == '(None)':
-                    var = None
-            else:
-                var = None
-
+            var = self.annotation_var
             show = var is not None
             if show:
                 annot_col, _ = self.input_data.get_column_view(var)
@@ -1483,9 +1488,7 @@ class OWHeatMap(widget.OWWidget):
         self.report_items((
             ("Columns:", "Clustering" if self.col_clustering else "No sorting"),
             ("Rows:", "Clustering" if self.row_clustering else "No sorting"),
-            ("Row annotation",
-             self.annotation_index > 0 and
-             self.annotation_vars[self.annotation_index])
+            ("Row annotation", self.annotation_var)
         ))
         self.report_plot()
 
