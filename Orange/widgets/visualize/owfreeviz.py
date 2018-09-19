@@ -13,16 +13,13 @@ from AnyQt.QtWidgets import QApplication, QGraphicsEllipseItem
 
 import pyqtgraph as pg
 
-from Orange.data import Table, Domain, StringVariable, ContinuousVariable
+from Orange.data import Table, Domain, StringVariable
 from Orange.projection.freeviz import FreeViz
-from Orange.widgets import widget, gui, settings, report
-from Orange.widgets.utils.annotated_data import (
-    create_annotated_table, ANNOTATED_DATA_SIGNAL_NAME, create_groups_table
-)
-from Orange.widgets.visualize.owscatterplotgraph import OWProjectionWidget
+from Orange.widgets import widget, gui, settings
 from Orange.widgets.visualize.utils.component import OWVizGraph
 from Orange.widgets.visualize.utils.plotutils import AnchorItem
-from Orange.widgets.widget import Input, Output
+from Orange.widgets.visualize.utils.widget import OWProjectionWidget
+from Orange.widgets.widget import Output
 
 
 class AsyncUpdateLoop(QObject):
@@ -229,26 +226,16 @@ class OWFreeViz(OWProjectionWidget):
     priority = 240
     keywords = ["viz"]
 
-    class Inputs:
-        data = Input("Data", Table, default=True)
-        data_subset = Input("Data Subset", Table)
-
-    class Outputs:
-        selected_data = Output("Selected Data", Table, default=True)
-        annotated_data = Output(ANNOTATED_DATA_SIGNAL_NAME, Table)
+    class Outputs(OWProjectionWidget.Outputs):
         components = Output("Components", Table)
 
     settings_version = 3
-    settingsHandler = settings.DomainContextHandler()
-
     initialization = settings.Setting(InitType.Circular)
-    auto_commit = settings.Setting(True)
-
+    GRAPH_CLASS = OWFreeVizGraph
     graph = settings.SettingProvider(OWFreeVizGraph)
-    graph_name = "graph.plot_widget.plotItem"
+    embedding_variables_names = ("freeviz-x", "freeviz-y")
 
     class Error(OWProjectionWidget.Error):
-        sparse_data = widget.Msg("Sparse data is not supported")
         no_class_var = widget.Msg("Need a class variable")
         not_enough_class_vars = widget.Msg(
             "Needs discrete class variable with at lest 2 values"
@@ -262,43 +249,9 @@ class OWFreeViz(OWProjectionWidget):
 
     def __init__(self):
         super().__init__()
-
-        self.data = None
-        self.subset_data = None
-        self.subset_indices = None
-        self._embedding_coords = None
         self._X = None
         self._Y = None
         self._rand_indices = None
-        self.variable_x = ContinuousVariable("freeviz-x")
-        self.variable_y = ContinuousVariable("freeviz-y")
-
-        box = gui.vBox(self.mainArea, True, margin=0)
-        self.graph = OWFreeVizGraph(self, box)
-        box.layout().addWidget(self.graph.plot_widget)
-
-        box = gui.vBox(self.controlArea, box=True)
-        gui.comboBox(box, self, "initialization", label="Initialization:",
-                     items=InitType.items(), orientation=Qt.Horizontal,
-                     labelWidth=90, callback=self.__init_combo_changed)
-        self.btn_start = gui.button(box, self, "Optimize", self.__toggle_start,
-                                    enabled=False)
-
-        g = self.graph.gui
-        g.point_properties_box(self.controlArea)
-        box = g.effects_box(self.controlArea)
-        g.add_control(box, gui.hSlider, "Hide radius:",
-            master=self.graph, value="radius",
-            minValue=0, maxValue=100,
-            step=10, createLabel=False,
-            callback=self.__radius_slider_changed)
-        g.plot_properties_box(self.controlArea)
-
-        self.controlArea.layout().addStretch(100)
-        self.graph.box_zoom_select(self.controlArea)
-
-        gui.auto_commit(self.controlArea, self, "auto_commit",
-                        "Send Selection", "Send Automatically")
 
         # FreeViz
         self._loop = AsyncUpdateLoop(parent=self)
@@ -309,6 +262,23 @@ class OWFreeViz(OWProjectionWidget):
         self.graph.view_box.started.connect(self._randomize_indices)
         self.graph.view_box.moved.connect(self._manual_move)
         self.graph.view_box.finished.connect(self._finish_manual_move)
+
+    def _add_top_controls(self):
+        box = gui.vBox(self.controlArea, box=True)
+        gui.comboBox(box, self, "initialization", label="Initialization:",
+                     items=InitType.items(), orientation=Qt.Horizontal,
+                     labelWidth=90, callback=self.__init_combo_changed)
+        self.btn_start = gui.button(box, self, "Optimize", self.__toggle_start,
+                                    enabled=False)
+        super()._add_top_controls()
+
+    def _add_middle_controls(self):
+        super()._add_middle_controls()
+        self.graph.gui.add_control(
+            self._effects_box, gui.hSlider, "Hide radius:", master=self.graph,
+            value="radius", minValue=0, maxValue=100, step=10,
+            createLabel=False, callback=self.__radius_slider_changed
+        )
 
     def __radius_slider_changed(self):
         self.graph.update_radius()
@@ -326,6 +296,7 @@ class OWFreeViz(OWProjectionWidget):
         if running:
             self._loop.cancel()
         if self.data is not None:
+            self.init_embedding_coords()
             self.setup_plot()
         if running:
             self._start()
@@ -375,37 +346,20 @@ class OWFreeViz(OWProjectionWidget):
         self.graph.update_coordinates()
 
     def clear(self):
+        super().clear()
         self._loop.cancel()
-        self.data = None
-        self.valid_data = None
-        self._embedding_coords = None
         self._X = None
         self._Y = None
         self._rand_indices = None
 
         self.graph.set_attributes(())
         self.graph.set_points([])
-        self.graph.update_coordinates()
-        self.graph.clear()
+        #self.graph.update_coordinates()  # TODO - check
 
-    @Inputs.data
-    def set_data(self, data):
-        self.clear_messages()
-        self.closeContext()
-        self.clear()
-        self.data = data
-        self._check_data()
-        self.init_attr_values()
-        self.openContext(data)
-        self.btn_start.setEnabled(self.data is not None)
-        self.cb_class_density.setEnabled(self.can_draw_density())
-
-    def _check_data(self):
+    def check_data(self):
+        super().check_data()
         if self.data is not None:
-            if self.data.is_sparse():
-                self.Error.sparse_data()
-                self.data = None
-            elif self.data.domain.class_var is None:
+            if self.data.domain.class_var is None:
                 self.Error.no_class_var()
                 self.data = None
             elif self.data.domain.class_var.is_discrete and \
@@ -428,6 +382,7 @@ class OWFreeViz(OWProjectionWidget):
                 else:
                     self.Error.no_valid_data()
                     self.data = None
+        self.btn_start.setEnabled(self.data is not None)
 
     def _prepare_freeviz_data(self):
         valid_mask = np.all(np.isfinite(self.data.X), axis=1) & \
@@ -444,35 +399,21 @@ class OWFreeViz(OWProjectionWidget):
         X[:, span > 0] /= span[span > 0].reshape(1, -1)
         self._X, self._Y, self.valid_data = X, Y, valid_mask
 
-    @Inputs.data_subset
-    def set_subset_data(self, subset):
-        self.subset_data = subset
-        self.subset_indices = {e.id for e in subset} \
-            if subset is not None else {}
-        self.controls.graph.alpha_value.setEnabled(subset is None)
-
-    def handleNewSignals(self):
-        if self.data is not None and self.valid_data is not None:
-            self.setup_plot()
-        self.commit()
-
-    def get_coordinates_data(self):
-        return (self._embedding_coords[:, 0], self._embedding_coords[:, 1]) \
-            if self._embedding_coords is not None else (None, None)
-
-    def get_subset_mask(self):
-        if self.subset_indices:
-            return np.array([ex.id in self.subset_indices
-                             for ex in self.data[self.valid_data]])
-
-    def setup_plot(self):
+    def init_embedding_coords(self):
         points = FreeViz.init_radial(self._X.shape[1]) \
             if self.initialization == InitType.Circular \
             else FreeViz.init_random(self._X.shape[1], 2)
         self.graph.set_points(points)
         self.__set_embedding_coords()
+
+    def __set_embedding_coords(self):
+        points = self.graph.get_points()
+        ex = np.dot(self._X, points)
+        self._embedding_coords = (ex / np.max(np.linalg.norm(ex, axis=1)))
+
+    def setup_plot(self):
         self.graph.set_attributes(self.data.domain.attributes)
-        self.graph.reset_graph()
+        super().setup_plot()
 
     def _randomize_indices(self):
         n = len(self._X)
@@ -516,75 +457,21 @@ class OWFreeViz(OWProjectionWidget):
             if selection is not None:
                 self.graph.selection = selection
                 self.graph.select_by_index(self.graph.get_selection())
-
-    def __set_embedding_coords(self):
-        points = self.graph.get_points()
-        ex = np.dot(self._X, points)
-        self._embedding_coords = (ex / np.max(np.linalg.norm(ex, axis=1)))
-
-    def selection_changed(self):
         self.commit()
 
     def commit(self):
-        selected = annotated = components = None
+        super().commit()
+        self.send_components()
+
+    def send_components(self):
+        components = None
         if self.data is not None and self.valid_data is not None:
-            name = self.data.name
-            domain = self.data.domain
-            metas = domain.metas + (self.variable_x, self.variable_y)
-            domain = Domain(domain.attributes, domain.class_vars, metas)
-            embedding_coords = np.zeros((len(self.data), 2), dtype=np.float)
-            embedding_coords[self.valid_data] = self._embedding_coords
-
-            data = self.data.transform(domain)
-            data[:, self.variable_x] = embedding_coords[:, 0][:, None]
-            data[:, self.variable_y] = embedding_coords[:, 1][:, None]
-
-            selection = self.graph.get_selection()
-            if len(selection):
-                selected = data[selection]
-                selected.name = name + ": selected"
-                selected.attributes = self.data.attributes
-            if self.graph.selection is not None and \
-                    np.max(self.graph.selection) > 1:
-                annotated = create_groups_table(data, self.graph.selection)
-            else:
-                annotated = create_annotated_table(data, selection)
-            annotated.attributes = self.data.attributes
-            annotated.name = name + ": annotated"
-
-            comp_domain = Domain(
-                self.data.domain.attributes,
-                metas=[StringVariable(name='component')])
-
+            meta_attrs = [StringVariable(name='component')]
+            domain = Domain(self.data.domain.attributes, metas=meta_attrs)
             metas = np.array([["FreeViz 1"], ["FreeViz 2"]])
-            components = Table.from_numpy(
-                comp_domain,
-                X=self.graph.get_points().T,
-                metas=metas)
-
-            components.name = name + ": components"
-
-        self.Outputs.selected_data.send(selected)
-        self.Outputs.annotated_data.send(annotated)
+            components = Table(domain, self.graph.get_points().T, metas=metas)
+            components.name = self.data.name
         self.Outputs.components.send(components)
-
-    def send_report(self):
-        if self.data is None:
-            return
-
-        def name(var):
-            return var and var.name
-
-        caption = report.render_items_vert((
-            ("Color", name(self.attr_color)),
-            ("Label", name(self.attr_label)),
-            ("Shape", name(self.attr_shape)),
-            ("Size", name(self.attr_size)),
-            ("Jittering", self.graph.jitter_size != 0 and
-             "{} %".format(self.graph.jitter_size))))
-        self.report_plot()
-        if caption:
-            self.report_caption(caption)
 
     @classmethod
     def migrate_settings(cls, _settings, version):

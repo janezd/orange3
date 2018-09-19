@@ -1,5 +1,6 @@
 # Test methods with long descriptive names can omit docstrings
 # pylint: disable=missing-docstring
+import numpy as np
 import scipy.sparse as sp
 
 from AnyQt.QtCore import QRectF, QPointF
@@ -48,6 +49,11 @@ class TestOWFreeViz(WidgetTest, WidgetOutputsTestMixin,
         self.widget.graph.select_by_rectangle(rect)
         return self.widget.graph.get_selection()
 
+    def _compare_selected_annotated_domains(self, selected, annotated):
+        selected_vars = selected.domain.variables
+        annotated_vars = annotated.domain.variables
+        self.assertLessEqual(set(selected_vars), set(annotated_vars))
+
     def test_optimization(self):
         self.send_signal(self.widget.Inputs.data, self.data)
         self.widget.btn_start.click()
@@ -78,3 +84,15 @@ class TestOWFreeViz(WidgetTest, WidgetOutputsTestMixin,
         w = self.widget
         self.send_signal(w.Inputs.data, None)
         self.widget.graph.controls.radius.setSliderPosition(3)
+
+    def test_output_components(self):
+        self.send_signal(self.widget.Inputs.data, self.data)
+        components = self.get_output(self.widget.Outputs.components)
+        domain = components.domain
+        self.assertEqual(domain.attributes, self.data.domain.attributes)
+        self.assertEqual(domain.class_vars, ())
+        self.assertEqual([m.name for m in domain.metas], ["component"])
+        X = np.array([[1, 0, -1, 0], [0, 1, 0, -1]]).astype(float)
+        np.testing.assert_array_almost_equal(components.X, X)
+        metas = [["FreeViz 1"], ["FreeViz 2"]]
+        np.testing.assert_array_equal(components.metas, metas)

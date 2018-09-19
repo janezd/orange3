@@ -1,5 +1,7 @@
 # Test methods with long descriptive names can omit docstrings
 # pylint: disable=missing-docstring
+import numpy as np
+
 from AnyQt.QtCore import QRectF, QPointF
 
 from Orange.data import Table, Domain
@@ -39,6 +41,11 @@ class TestOWRadviz(WidgetTest, WidgetOutputsTestMixin,
         self.widget.graph.select_by_rectangle(QRectF(QPointF(-20, -20), QPointF(20, 20)))
         return self.widget.graph.get_selection()
 
+    def _compare_selected_annotated_domains(self, selected, annotated):
+        selected_vars = selected.domain.variables
+        annotated_vars = annotated.domain.variables
+        self.assertLessEqual(set(selected_vars), set(annotated_vars))
+
     def test_no_features(self):
         w = self.widget
         data2 = self.data.transform(Domain(self.data.domain.attributes[:1],
@@ -56,3 +63,25 @@ class TestOWRadviz(WidgetTest, WidgetOutputsTestMixin,
         self.assertTrue(w.Error.no_instances.is_shown())
         self.send_signal(w.Inputs.data, self.data)
         self.assertFalse(w.Error.no_instances.is_shown())
+
+    def test_saved_features(self):
+        self.send_signal(self.widget.Inputs.data, self.data)
+        self.widget.model_selected.pop(0)
+        settings = self.widget.settingsHandler.pack_data(self.widget)
+        w = self.create_widget(OWRadviz, stored_settings=settings)
+        self.send_signal(self.widget.Inputs.data, self.data, widget=w)
+        selected = [attr.name for attr in self.widget.model_selected]
+        self.assertListEqual(selected, [a.name for a in w.model_selected])
+
+    def test_output_components(self):
+        self.send_signal(self.widget.Inputs.data, self.data)
+        components = self.get_output(self.widget.Outputs.components)
+        domain = components.domain
+        self.assertEqual(domain.attributes, self.data.domain.attributes)
+        self.assertEqual(domain.class_vars, ())
+        self.assertEqual([m.name for m in domain.metas], ["component"])
+        X = np.array([[1, 0, -1, 0], [0, 1, 0, -1],
+                      [0, 1.57, 3.14, -1.57]])
+        np.testing.assert_array_almost_equal(components.X, X, 2)
+        metas = [["RX"], ["RY"], ["angle"]]
+        np.testing.assert_array_equal(components.metas, metas)

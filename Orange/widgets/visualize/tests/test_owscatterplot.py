@@ -15,7 +15,7 @@ from Orange.widgets.tests.utils import simulate
 from Orange.widgets.visualize.owscatterplot import (
     OWScatterPlot, ScatterPlotVizRank
 )
-from Orange.widgets.visualize.owscatterplotgraph import MAX
+from Orange.widgets.visualize.utils.widget import MAX_CATEGORIES
 from Orange.widgets.widget import AttributeList
 
 
@@ -606,11 +606,11 @@ class TestOWScatterPlot(WidgetTest, WidgetOutputsTestMixin,
             pen_data, brush_data = self.widget.graph.get_colors()
             self.assertEqual(max, len(np.unique([id(p) for p in pen_data])), )
 
-        assert_equal(prepare_data(), MAX)
+        assert_equal(prepare_data(), MAX_CATEGORIES)
         # data with nan value
         data = prepare_data()
         data.Y[42] = np.nan
-        assert_equal(data, MAX + 1)
+        assert_equal(data, MAX_CATEGORIES + 1)
 
 
 if __name__ == "__main__":
