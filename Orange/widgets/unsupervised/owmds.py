@@ -16,9 +16,8 @@ from Orange.projection.manifold import torgerson, MDS
 from Orange.widgets import gui, settings, report
 from Orange.widgets.settings import SettingProvider
 from Orange.widgets.utils.sql import check_sql_input
-from Orange.widgets.visualize.owscatterplotgraph import (
-    OWScatterPlotBase, OWProjectionWidget
-)
+from Orange.widgets.visualize.owscatterplotgraph import OWScatterPlotBase
+from Orange.widgets.visualize.utils.widget import OWProjectionWidgetBase as OWProjectionWidget
 from Orange.widgets.widget import Msg, OWWidget, Input, Output
 from Orange.widgets.utils.annotated_data import (
     ANNOTATED_DATA_SIGNAL_NAME, create_annotated_table, create_groups_table,
