@@ -26,10 +26,9 @@ from Orange.widgets.utils.annotated_data import (
     create_annotated_table, create_groups_table, ANNOTATED_DATA_SIGNAL_NAME
 )
 from Orange.widgets.utils.itemmodels import DomainModel
-from Orange.widgets.visualize.owscatterplotgraph import (
-    OWScatterPlotBase, OWProjectionWidget
-)
+from Orange.widgets.visualize.owscatterplotgraph import OWScatterPlotBase
 from Orange.widgets.visualize.utils import VizRankDialogAttrPair
+from Orange.widgets.visualize.utils.widget import OWProjectionWidgetBase as OWProjectionWidget
 from Orange.widgets.widget import AttributeList, Msg, Input, Output
 
 

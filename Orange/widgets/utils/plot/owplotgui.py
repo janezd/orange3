@@ -136,8 +136,10 @@ class AddVariablesDialog(QDialog):
 
 
 class VariablesSelection:
-    def __call__(self, master, model_selected, model_other, widget=None):
+    def __init__(self, master, model_selected, model_other, widget=None):
         self.master = master
+        self.model_selected = model_selected
+        self.model_other = model_other
 
         params_view = {"sizePolicy": QSizePolicy(*SIZE_POLICY_ADAPTING),
                        "selectionMode": QListView.ExtendedSelection,
@@ -159,14 +161,7 @@ class VariablesSelection:
             triggered=self.__deactivate_selection
         )
         view.addAction(delete)
-
-        self.model_selected = model = model_selected
-
-        model.rowsInserted.connect(master.invalidate_plot)
-        model.rowsRemoved.connect(master.invalidate_plot)
-        model.rowsMoved.connect(master.invalidate_plot)
-
-        view.setModel(model)
+        view.setModel(self.model_selected)
 
         addClassLabel = QAction("+", master,
                                 toolTip="Add new class label",
@@ -175,7 +170,8 @@ class VariablesSelection:
                                    toolTip="Remove selected class label",
                                    triggered=self.__deactivate_selection)
 
-        add_remove = itemmodels.ModelActionsWidget([addClassLabel, removeClassLabel], master)
+        add_remove = itemmodels.ModelActionsWidget(
+            [addClassLabel, removeClassLabel], master)
         add_remove.layout().addStretch(10)
         add_remove.layout().setSpacing(1)
         add_remove.setSizePolicy(*SIZE_POLICY_FIXED)
@@ -183,8 +179,6 @@ class VariablesSelection:
 
         self.add_remove = add_remove
         self.box = add_remove.buttons[1]
-
-        self.model_other = model_other
 
     def set_enabled(self, is_enabled):
         self.view_selected.setEnabled(is_enabled)

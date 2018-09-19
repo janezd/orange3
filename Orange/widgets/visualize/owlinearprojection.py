@@ -297,10 +297,13 @@ class OWLinearProjection(widget.OWWidget):
 
         SIZE_POLICY = (QSizePolicy.Minimum, QSizePolicy.Maximum)
 
-        self.variables_selection = VariablesSelection()
         self.model_selected = VariableListModel(enable_dnd=True)
+        self.model_selected.rowsInserted.connect(self.invalidate_plot)
+        self.model_selected.rowsRemoved.connect(self.invalidate_plot)
         self.model_other = VariableListModel(enable_dnd=True)
-        self.variables_selection(self, self.model_selected, self.model_other)
+        self.variables_selection = VariablesSelection(
+            self, self.model_selected, self.model_other
+        )
 
         self.vizrank, self.btn_vizrank = LinearProjectionVizRank.add_vizrank(
             self.controlArea, self, "Suggest Features", self._vizrank)

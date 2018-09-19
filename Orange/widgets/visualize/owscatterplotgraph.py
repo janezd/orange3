@@ -1,12 +1,10 @@
-from collections import Counter, defaultdict
 import sys
 import itertools
 import warnings
 from xml.sax.saxutils import escape
-from math import log2, log10, floor, ceil
+from math import log10, floor, ceil
 
 import numpy as np
-from scipy import sparse as sp
 
 from AnyQt.QtCore import Qt, QRectF, QPointF, QSize
 from AnyQt.QtGui import (
@@ -18,31 +16,27 @@ from AnyQt.QtWidgets import (
 
 import pyqtgraph as pg
 import pyqtgraph.graphicsItems.ScatterPlotItem
-from pyqtgraph.graphicsItems.LegendItem import LegendItem, ItemSample
+from pyqtgraph.graphicsItems.LegendItem import (
+    LegendItem as PgLegendItem, ItemSample
+)
 from pyqtgraph.graphicsItems.TextItem import TextItem
 
-from Orange.statistics.util import bincount
 from Orange.util import OrangeDeprecationWarning
 from Orange.widgets import gui
+from Orange.widgets.settings import Setting
 from Orange.widgets.utils import classdensity
-from Orange.widgets.utils.colorpalette import (
-    ColorPaletteGenerator, ContinuousPaletteGenerator, DefaultRGBColors
-)
+from Orange.widgets.utils.colorpalette import ColorPaletteGenerator
 from Orange.widgets.utils.plot import OWPalette, OWPlotGUI
+from Orange.widgets.visualize.owscatterplotgraph_obsolete import (
+    OWScatterPlotGraph as OWScatterPlotGraphObs
+)
 from Orange.widgets.visualize.utils.plotutils import (
     HelpEventDelegate as EventDelegate,
     InteractiveViewBox as ViewBox
 )
-from Orange.widgets.visualize.owscatterplotgraph_obsolete import (
-    OWScatterPlotGraph as OWScatterPlotGraphObs
-)
-from Orange.widgets.settings import Setting, ContextSetting
-from Orange.widgets.widget import OWWidget, Msg
 
 
 SELECTION_WIDTH = 5
-MAX = 11  # maximum number of colors or shapes (including Other)
-MAX_POINTS_IN_TOOLTIP = 5
 
 
 class PaletteItemSample(ItemSample):
@@ -85,7 +79,7 @@ class PaletteItemSample(ItemSample):
             p.drawStaticText(20, i * 15 + 1, label)
 
 
-class LegendItem(LegendItem):
+class LegendItem(PgLegendItem):
     def __init__(self, size=None, offset=None, pen=None, brush=None):
         super().__init__(size, offset)
 
@@ -747,7 +741,7 @@ class OWScatterPlotBase(gui.OWComponent):
         mx = np.max(size_column)
         if mx > 0:
             size_column /= mx
-        return self.MinShapeSize + self.point_width * size_column
+        return self.MinShapeSize + (5 + self.point_width) * size_column
 
     def update_sizes(self):
         """
@@ -1083,7 +1077,7 @@ class OWScatterPlotBase(gui.OWComponent):
     def update_legend(self):
         """Show or hide the legend"""
         if self.legend:
-            self.legend.setVisible(self.show_legend)
+            self.legend.setVisible(self.show_legend and len(self.legend.items))
 
     def create_legend(self):
         """Create a legend"""
@@ -1205,12 +1199,12 @@ class OWScatterPlotBase(gui.OWComponent):
             self.select(points)
 
     def unselect_all(self):
-        self.selection = None
-        self.select([])
-        self.update_selection_colors()
-        if self.label_only_selected:
-            self.update_labels()
-        self.master.selection_changed()
+        if self.selection is not None:
+            self.selection = None
+            self.update_selection_colors()
+            if self.label_only_selected:
+                self.update_labels()
+            self.master.selection_changed()
 
     def select(self, points):
         # noinspection PyArgumentList
@@ -1281,345 +1275,3 @@ class HelpEventDelegate(EventDelegate):
         warnings.warn("HelpEventDelegate class has been deprecated since 3.17."
                       " Use Orange.widgets.visualize.utils.plotutils."
                       "HelpEventDelegate instead.", OrangeDeprecationWarning)
-
-
-class OWProjectionWidget(OWWidget):
-    """
-    Base widget for widgets that use attribute data to set the colors, labels,
-    shapes and sizes of points.
-
-    The widgets defines settings `attr_color`, `attr_label`, `attr_shape`
-    and `attr_size`, but leaves defining the gui to the derived widgets.
-    These are expected to have controls that manipulate these settings,
-    and the controls are expected to use attribute models.
-
-    The widgets also defines attributes `data` and `valid_data` and expects
-    the derived widgets to use them to store an instances of `data.Table`
-    and a bool `np.ndarray` with indicators of valid (that is, shown)
-    data points.
-    """
-    attr_color = ContextSetting(None, required=ContextSetting.OPTIONAL)
-    attr_label = ContextSetting(None, required=ContextSetting.OPTIONAL)
-    attr_shape = ContextSetting(None, required=ContextSetting.OPTIONAL)
-    attr_size = ContextSetting(None, required=ContextSetting.OPTIONAL)
-
-    class Information(OWWidget.Information):
-        missing_size = Msg(
-            "Points with undefined '{}' are shown in smaller size")
-        missing_shape = Msg(
-            "Points with undefined '{}' are shown as crossed circles")
-
-    def __init__(self):
-        super().__init__()
-        self.data = None
-        self.valid_data = None
-
-        self.set_palette()
-
-    def init_attr_values(self):
-        """
-        Set the models for `attr_color`, `attr_shape`, `attr_size` and
-        `attr_label`. All values are set to `None`, except `attr_color`
-        which is set to the class variable if it exists.
-        """
-        data = self.data
-        domain = data.domain if data and len(data) else None
-        for attr in ("attr_color", "attr_shape", "attr_size", "attr_label"):
-            getattr(self.controls, attr).model().set_domain(domain)
-            setattr(self, attr, None)
-        if domain is not None:
-            self.attr_color = domain.class_var
-
-    def get_coordinates_data(self):
-        """A get coordinated method that returns no coordinates.
-
-        Derived classes must override this method.
-        """
-        return None, None
-
-    def get_subset_mask(self):
-        """
-        Return the bool array indicating the points in the subset
-
-        The base method does nothing and would usually be overridden by
-        a method that returns indicators from the subset signal.
-
-        Do not confuse the subset with selection.
-
-        Returns:
-            (np.ndarray or `None`): a bool array of indicators
-        """
-        return None
-
-    @staticmethod
-    def __get_overlap_groups(x, y):
-        coord_to_id = defaultdict(list)
-        for i, xy in enumerate(zip(x, y)):
-            coord_to_id[xy].append(i)
-        return coord_to_id
-
-    def get_column(self, attr, filter_valid=True,
-                   merge_infrequent=False, return_labels=False):
-        """
-        Retrieve the data from the given column in the data table
-
-        The method:
-        - densifies sparse data,
-        - converts arrays with dtype object to floats if the attribute is
-          actually primitive,
-        - filters out invalid data (if `filter_valid` is `True`),
-        - merges infrequent (discrete) values into a single value
-          (if `merge_infrequent` is `True`).
-
-        Tha latter feature is used for shapes and labels, where only a
-        set number (`MAX`) of different values is shown, and others are
-        merged into category 'Other'. In this case, the method may return
-        either the data (e.g. color indices, shape indices) or the list
-        of retained values, followed by `['Other']`.
-
-        Args:
-            attr (:obj:~Orange.data.Variable): the column to extract
-            filter_valid (bool): filter out invalid data (default: `True`)
-            merge_infrequent (bool): merge infrequent values (default: `False`)
-            return_labels (bool): return a list of labels instead of data
-                (default: `False`)
-
-        Returns:
-            (np.ndarray): (valid) data from the column, or a list of labels
-        """
-        if attr is None:
-            return None
-        all_data = self.data.get_column_view(attr)[0]
-        if sp.issparse(all_data):
-            all_data = all_data.toDense()  # TODO -- just guessing; fix this!
-        elif all_data.dtype == object and attr.is_primitive():
-            all_data = all_data.astype(float)
-        if filter_valid and self.valid_data is not None:
-            all_data = all_data[self.valid_data]
-        if not merge_infrequent or attr.is_continuous \
-                or len(attr.values) <= MAX:
-            return attr.values if return_labels else all_data
-        dist = bincount(all_data, max_val=len(attr.values) - 1)
-        infrequent = np.zeros(len(attr.values), dtype=bool)
-        infrequent[np.argsort(dist[0])[:-(MAX-1)]] = True
-        # If discrete variable has more than maximium allowed values,
-        # less used values are joined as "Other"
-        if return_labels:
-            return [value for value, infreq in zip(attr.values, infrequent)
-                    if not infreq] + ["Other"]
-        else:
-            result = all_data.copy()
-            freq_vals = [i for i, f in enumerate(infrequent) if not f]
-            for i, f in enumerate(infrequent):
-                result[all_data == i] = MAX - 1 if f else freq_vals.index(i)
-            return result
-
-    # Sizes
-    def get_size_data(self):
-        """Return the column corresponding to `attr_size`"""
-        if self.attr_size == OWPlotGUI.SizeByOverlap:
-            x, y = self.get_coordinates_data()
-            coord_to_id = self.__get_overlap_groups(x, y)
-            overlaps = [len(coord_to_id[xy]) for xy in zip(x, y)]
-            return [1 + log2(o) for o in overlaps]
-        return self.get_column(self.attr_size)
-
-    def impute_sizes(self, size_data):
-        """
-        Default imputation for size data
-
-        Missing values are replaced by `MinShapeSize - 2`. Imputation is
-        done in place.
-
-        Args:
-            size_data (np.ndarray): scaled points sizes
-        """
-        nans = np.isnan(size_data)
-        if np.any(nans):
-            size_data[nans] = self.graph.MinShapeSize - 2
-            self.Information.missing_size(self.attr_size)
-        else:
-            self.Information.missing_size.clear()
-
-    def sizes_changed(self):
-        self.graph.update_sizes()
-        self.graph.update_colors()
-
-    # Colors
-    def get_color_data(self):
-        """Return the column corresponding to color data"""
-        colors = self.get_column(self.attr_color, merge_infrequent=True)
-        if self.attr_size == OWPlotGUI.SizeByOverlap:
-            # color overlapping points by most frequent color
-            x, y = self.get_coordinates_data()
-            coord_to_id = self.__get_overlap_groups(x, y)
-            majority_colors = np.empty(len(x))
-            for i, xy in enumerate(zip(x, y)):
-                cnt = Counter(colors[j] for j in coord_to_id[xy])
-                majority_colors[i] = cnt.most_common(1)[0][0]
-            return majority_colors
-        return colors
-
-    def get_color_labels(self):
-        """
-        Return labels for the color legend
-
-        Returns:
-            (list of str): labels
-        """
-        return self.get_column(self.attr_color, merge_infrequent=True,
-                               return_labels=True)
-
-
-    def is_continuous_color(self):
-        """
-        Tells whether the color is continuous
-
-        Returns:
-            (bool):
-        """
-        return self.attr_color is not None and self.attr_color.is_continuous
-
-    def set_palette(self):
-        """
-        Set the graph palette suitable for the current `attr_color`
-
-        This method is invoked by the plot's `get_data` and must be overridden
-        if the widget offers coloring that is not based on attribute values.
-        """
-        if self.attr_color is None:
-            self.graph.palette = None
-            return
-        colors = self.attr_color.colors
-        if self.attr_color.is_discrete:
-            self.graph.palette = ColorPaletteGenerator(
-                number_of_colors=min(len(colors), MAX),
-                rgb_colors=colors if len(colors) <= MAX
-                else DefaultRGBColors)
-        else:
-            self.graph.palette = ContinuousPaletteGenerator(*colors)
-
-    def can_draw_density(self):
-        """
-        Tells whether the current data and settings are suitable for drawing
-        densities
-
-        Returns:
-            (bool):
-        """
-        return self.data is not None and \
-               self.data.domain is not None and \
-               len(self.data) > 1 and \
-               self.attr_color is not None
-
-    def colors_changed(self):
-        self.graph.update_colors()
-
-    # Labels
-    def get_label_data(self, formatter=None):
-        """Return the column corresponding to label data"""
-        if self.attr_label:
-            label_data = self.get_column(self.attr_label)
-            return map(formatter or self.attr_label.str_val, label_data)
-
-    def labels_changed(self):
-        self.graph.update_labels()
-
-    # Shapes
-    def get_shape_data(self):
-        """
-        Return labels for the shape legend
-
-        Returns:
-            (list of str): labels
-        """
-        return self.get_column(self.attr_shape, merge_infrequent=True)
-
-    def get_shape_labels(self):
-        return self.get_column(self.attr_shape, merge_infrequent=True,
-                               return_labels=True)
-
-    def impute_shapes(self, shape_data, default_symbol):
-        """
-        Default imputation for shape data
-
-        Missing values are replaced by `default_symbol`. Imputation is
-        done in place.
-
-        Args:
-            shape_data (np.ndarray): scaled points sizes
-            default_symbol (str): a string representing the symbol
-        """
-        if shape_data is None:
-            return 0
-        nans = np.isnan(shape_data)
-        if np.any(nans):
-            shape_data[nans] = default_symbol
-            self.Information.missing_shape(self.attr_shape)
-        else:
-            self.Information.missing_shape.clear()
-        return shape_data
-
-    def shapes_changed(self):
-        self.graph.update_shapes()
-
-    # Tooltip
-    def _point_tooltip(self, point_id, skip_attrs=()):
-        def show_part(point_data, singular, plural, max_shown, vars):
-            cols = [escape('{} = {}'.format(var.name, point_data[var]))
-                    for var in vars[:max_shown + 2]
-                    if vars == domain.class_vars
-                    or var not in skip_attrs][:max_shown]
-            if not cols:
-                return ""
-            n_vars = len(vars)
-            if n_vars > max_shown:
-                cols[-1] = "... and {} others".format(n_vars - max_shown + 1)
-            return \
-                "<b>{}</b>:<br/>".format(singular if n_vars < 2 else plural) \
-                + "<br/>".join(cols)
-
-        domain = self.data.domain
-        parts = (("Class", "Classes", 4, domain.class_vars),
-                 ("Meta", "Metas", 4, domain.metas),
-                 ("Feature", "Features", 10, domain.attributes))
-
-        point_data = self.data[point_id]
-        return "<br/>".join(show_part(point_data, *columns)
-                            for columns in parts)
-
-    def get_tooltip(self, point_ids):
-        """
-        Return the tooltip string for the given points
-
-        The method is called by the plot on mouse hover
-
-        Args:
-            point_ids (list): indices into `data`
-
-        Returns:
-            (str):
-        """
-        text = "<hr/>".join(self._point_tooltip(point_id)
-                            for point_id in point_ids[:MAX_POINTS_IN_TOOLTIP])
-        if len(point_ids) > MAX_POINTS_IN_TOOLTIP:
-            text = "{} instances<hr/>{}<hr/>...".format(len(point_ids), text)
-        return text
-
-    def keyPressEvent(self, event):
-        """Update the tip about using the modifier keys when selecting"""
-        super().keyPressEvent(event)
-        self.graph.update_tooltip(event.modifiers())
-
-    def keyReleaseEvent(self, event):
-        """Update the tip about using the modifier keys when selecting"""
-        super().keyReleaseEvent(event)
-        self.graph.update_tooltip(event.modifiers())
-
-    # Legend
-    def combined_legend(self):
-        """Tells whether the shape and color legends are combined into one"""
-        return self.attr_shape == self.attr_color
-
-    def sizeHint(self):
-        return QSize(1132, 708)
