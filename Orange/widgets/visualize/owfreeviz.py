@@ -263,22 +263,22 @@ class OWFreeViz(OWProjectionWidget):
         self.graph.view_box.moved.connect(self._manual_move)
         self.graph.view_box.finished.connect(self._finish_manual_move)
 
-    def _add_top_controls(self):
-        box = gui.vBox(self.controlArea, box=True)
-        gui.comboBox(box, self, "initialization", label="Initialization:",
-                     items=InitType.items(), orientation=Qt.Horizontal,
-                     labelWidth=90, callback=self.__init_combo_changed)
-        self.btn_start = gui.button(box, self, "Optimize", self.__toggle_start,
-                                    enabled=False)
-        super()._add_top_controls()
-
-    def _add_middle_controls(self):
-        super()._add_middle_controls()
+    def _add_controls(self):
+        self.__add_controls_start_box()
+        super()._add_controls()
         self.graph.gui.add_control(
             self._effects_box, gui.hSlider, "Hide radius:", master=self.graph,
             value="radius", minValue=0, maxValue=100, step=10,
             createLabel=False, callback=self.__radius_slider_changed
         )
+
+    def __add_controls_start_box(self):
+        box = gui.vBox(self.controlArea, box=True)
+        gui.comboBox(box, self, "initialization", label="Initialization:",
+                     items=InitType.items(), orientation=Qt.Horizontal,
+                     labelWidth=90, callback=self.__init_combo_changed)
+        self.btn_start = gui.button(box, self, "Start", self.__toggle_start,
+                                    enabled=False)
 
     def __radius_slider_changed(self):
         self.graph.update_radius()

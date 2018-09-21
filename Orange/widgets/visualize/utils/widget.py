@@ -403,10 +403,6 @@ class OWProjectionWidget(OWProjectionWidgetBase):
         self.subset_indices = None
         self._embedding_coords = None  # embeddings for valid data
         self.__pending_selection = self.selection
-
-        # GUI
-        self._effects_box = None
-        self._plot_box = None
         self.setup_gui()
 
     @property
@@ -424,24 +420,19 @@ class OWProjectionWidget(OWProjectionWidgetBase):
     # GUI
     def setup_gui(self):
         self._add_graph()
-        self._add_top_controls()
-        self._add_middle_controls()
-        self._add_bottom_controls()
+        self._add_controls()
 
     def _add_graph(self):
         box = gui.vBox(self.mainArea, True, margin=0)
         self.graph = self.GRAPH_CLASS(self, box)
         box.layout().addWidget(self.graph.plot_widget)
 
-    def _add_top_controls(self):
-        self.graph.gui.point_properties_box(self.controlArea)
-
-    def _add_middle_controls(self):
+    def _add_controls(self):
+        self._point_box = self.graph.gui.point_properties_box(self.controlArea)
         self._effects_box = self.graph.gui.effects_box(self.controlArea)
         self._plot_box = self.graph.gui.plot_properties_box(self.controlArea)
-
-    def _add_bottom_controls(self):
-        self.controlArea.layout().addStretch(100)
+        self.control_area_stretch = gui.widgetBox(self.controlArea)
+        self.control_area_stretch.layout().addStretch(100)
         self.graph.box_zoom_select(self.controlArea)
         gui.auto_commit(self.controlArea, self, "auto_commit",
                         "Send Selection", "Send Automatically")

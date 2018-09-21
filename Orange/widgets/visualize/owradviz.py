@@ -334,20 +334,6 @@ class OWRadviz(OWProjectionWidget):
         self.graph.view_box.moved.connect(self._manual_move)
         self.graph.view_box.finished.connect(self._finish_manual_move)
 
-    def _add_top_controls(self):
-        self.variables_selection = VariablesSelection(
-            self, self.model_selected, self.model_other, self.controlArea
-        )
-        self.variables_selection.add_remove.layout().addWidget(
-            self.btn_vizrank
-        )
-        super()._add_top_controls()
-
-    def _add_bottom_controls(self):
-        self.graph.box_zoom_select(self.controlArea)
-        gui.auto_commit(self.controlArea, self, "auto_commit",
-                        "Send Selection", "Send Automatically")
-
     def vizrank_set_attrs(self, attrs):
         if not attrs:
             return
