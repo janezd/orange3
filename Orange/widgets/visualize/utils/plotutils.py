@@ -38,10 +38,13 @@ class AnchorItem(pg.GraphicsObject):
 
         self._label = TextItem(text=text, color=(10, 10, 10))
         self._label.setParentItem(self)
-        self._label.setPos(self._spine.line().p2())
+        self._label.setPos(*self.get_xy())
 
         if parent is not None:
             self.setParentItem(parent)
+
+    def get_xy(self):
+        return self._spine.line().p2()
 
     def setText(self, text):
         if text != self._text:

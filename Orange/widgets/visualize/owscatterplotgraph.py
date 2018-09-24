@@ -468,6 +468,12 @@ class OWScatterPlotBase(gui.OWComponent):
     two cases, "shapes" for the view and "sizes" for the model. The colors
     for the view are more complicated since they deal with discrete and
     continuous palettes, and the shapes for the view merge infrequent shapes.)
+
+    The plot can also show just a random sample of the data. The sample size is
+    set by `set_sample_size`, and the rest is taken care by the plot: the
+    widget keeps providing the data for all points, selection indices refer
+    to the entire set etc. Internally, sampling happens as early as possible
+    (in methods `get_<something>`).
     """
     label_only_selected = Setting(False)
     point_width = Setting(10)
@@ -504,13 +510,16 @@ class OWScatterPlotBase(gui.OWComponent):
         self.density_img = None
         self.scatterplot_item = None
         self.scatterplot_item_sel = None
-
         self.labels = []
 
         self.master = scatter_widget
 
         self.selection = None  # np.ndarray
-        self.n_points = 0
+
+        self.n_valid = 0
+        self.n_shown = 0
+        self.sample_size = None
+        self.sample_indices = None
 
         self.gui = OWPlotGUI(self)
         self.palette = None
@@ -563,6 +572,7 @@ class OWScatterPlotBase(gui.OWComponent):
         text = self.tiptexts.get(int(modifiers), self.tiptexts[0])
         self.tip_textitem.setHtml(text)
 
+    # TODO: Rename to remove_plot_items
     def clear(self):
         """
         Remove all graphical elements from the plot
@@ -588,9 +598,16 @@ class OWScatterPlotBase(gui.OWComponent):
         self.scatterplot_item = None
         self.scatterplot_item_sel = None
         self.labels = []
-        self.selection = None
+        self.view_box.init_history()
+        self.view_box.tag_history()
 
-    def reset_graph(self):
+    # TODO: I hate `keep_something` and `reset_something` arguments
+    # __keep_selection is used exclusively be set_sample size which would
+    # otherwise just repeat the code from reset_graph except for resetting
+    # the selection. I'm uncomfortable with this; we may prefer to have a
+    # method _reset_graph which does everything except resetting the selection,
+    # and reset_graph would call it.
+    def reset_graph(self, __keep_selection=False):
         """
         Reset the graph to new data (or no data)
 
@@ -602,10 +619,26 @@ class OWScatterPlotBase(gui.OWComponent):
         The method must also be called when the data is gone.
 
         The method calls `clear`, followed by calls of all update methods.
+
+        NB. Argument `__keep_selection` is for internal use only
         """
         self.clear()
+        if not __keep_selection:
+            self.selection = None
+        self.sample_indices = None
         self.update_coordinates()
         self.update_point_props()
+
+    def set_sample_size(self, sample_size):
+        """
+        Set the sample size
+
+        Args:
+            sample_size (int or None): sample size or `None` to show all points
+        """
+        if self.sample_size != sample_size:
+            self.sample_size = sample_size
+            self.reset_graph(True)
 
     def update_point_props(self):
         """
@@ -621,6 +654,12 @@ class OWScatterPlotBase(gui.OWComponent):
         self.update_labels()
 
     # Coordinates
+    # TODO: It could be nice if this method was run on entire data, not just
+    # a sample. For this, however, it would need to either be called from
+    # `get_coordinates` before sampling (very ugly) or call
+    # `self.master.get_coordinates_data` (beyond ugly) or the widget would
+    # have to store the ranges of unsampled data (ugly).
+    # Maybe we leave it as it is.
     def _reset_view(self, x_data, y_data):
         """
         Set the range of the view box
@@ -634,8 +673,13 @@ class OWScatterPlotBase(gui.OWComponent):
         self.view_box.setRange(
             QRectF(min_x, min_y, max_x - min_x, max_y - min_y),
             padding=0.025)
-        self.view_box.init_history()
-        self.view_box.tag_history()
+
+    def _filter_visible(self, data):
+        """Return the sample from the data using the stored sample_indices"""
+        if data is None or self.sample_indices is None:
+            return data
+        else:
+            return np.asarray(data[self.sample_indices])
 
     def get_coordinates(self):
         """
@@ -644,21 +688,49 @@ class OWScatterPlotBase(gui.OWComponent):
         The method is called by `update_coordinates`. It gets the coordinates
         from the widget, jitters them and return them.
 
-        The method also stores the number of points.
+        The methods also initializes the sample indices if neededd and stores
+        the original and sampled number of points.
 
         Returns:
-            (tuple): a pair of numpy arrays containing coordinates,
+            (tuple): a pair of numpy arrays containing (sampled) coordinates,
                 or `(None, None)`.
         """
         x, y = self.master.get_coordinates_data()
         if x is None:
-            self.n_points = 0
+            self.n_valid = self.n_shown = 0
             return None, None
+        self.n_valid = len(x)
+        self._create_sample()
+        x = self._filter_visible(x)
+        y = self._filter_visible(y)
+        # Jittering after sampling is OK if widgets do not change the sample
+        # semi-permanently, e.g. take a sample for the duration of some
+        # animation. If the sample size changes dynamically (like by adding
+        # a "sample size" slider), points would move around when the sample
+        # size changes. To prevent this, jittering should be done before
+        # sampling (i.e. two lines earlier). This would slow it down somewhat.
         x, y = self.jitter_coordinates(x, y)
-        self.n_points = len(x) if x is not None else 0
         return x, y
 
+    def _create_sample(self):
+        """
+        Create a random sample if the data is larger than the set sample size
+        """
+        self.n_shown = min(self.n_valid, self.sample_size or self.n_valid)
+        if self.sample_size is not None \
+                and self.sample_indices is None \
+                and self.n_valid != self.n_shown:
+            random = np.random.RandomState(seed=0)
+            self.sample_indices = random.choice(
+                self.n_valid, self.n_shown, replace=False)
+            # TODO: Is this really needed?
+            np.sort(self.sample_indices)
+
     def jitter_coordinates(self, x, y):
+        """
+        Display coordinates to random positions within ellipses with
+        radiuses of `self.jittter_size` percents of spans
+        """
         if self.jitter_size == 0:
             return x, y
         return self._jitter_data(x, y)
@@ -675,8 +747,7 @@ class OWScatterPlotBase(gui.OWComponent):
         return (x + magnitude * span_x * rs * np.cos(phis),
                 y + magnitude * span_y * rs * np.sin(phis))
 
-    @classmethod
-    def _update_plot_coordinates(cls, plot, x, y):
+    def _update_plot_coordinates(self, plot, x, y):
         """
         Change the coordinates of points while keeping other properites
 
@@ -707,7 +778,11 @@ class OWScatterPlotBase(gui.OWComponent):
         if x is None or not len(x):
             return
         if self.scatterplot_item is None:
-            kwargs = {"x": x, "y": y, "data": np.arange(self.n_points)}
+            if self.sample_indices is None:
+                indices = np.arange(self.n_valid)
+            else:
+                indices = self.sample_indices
+            kwargs = dict(x=x, y=y, data=indices)
             self.scatterplot_item = ScatterPlotItem(**kwargs)
             self.scatterplot_item.sigClicked.connect(self.select_by_click)
             self.scatterplot_item_sel = ScatterPlotItem(**kwargs)
@@ -718,7 +793,7 @@ class OWScatterPlotBase(gui.OWComponent):
             self._update_plot_coordinates(self.scatterplot_item, x, y)
             self._update_plot_coordinates(self.scatterplot_item_sel, x, y)
 
-        self.update_label_coords(x, y)
+        self._update_label_coords(x, y)
         self.update_density()  # Todo: doesn't work: try MDS with density on
         self._reset_view(x, y)
 
@@ -735,7 +810,8 @@ class OWScatterPlotBase(gui.OWComponent):
         """
         size_column = self.master.get_size_data()
         if size_column is None:
-            return np.ones(self.n_points) * self.point_width
+            return np.ones(self.n_shown) * self.point_width
+        size_column = self._filter_visible(size_column)
         size_column = size_column.copy()
         size_column -= np.min(size_column)
         mx = np.max(size_column)
@@ -784,7 +860,9 @@ class OWScatterPlotBase(gui.OWComponent):
         """
         self.master.set_palette()
         c_data = self.master.get_color_data()
+        c_data = self._filter_visible(c_data)
         subset = self.master.get_subset_mask()
+        subset = self._filter_visible(subset)
         self.subset_is_shown = subset is not None
         if c_data is None:  # same color
             return self._get_same_colors(subset)
@@ -807,14 +885,14 @@ class OWScatterPlotBase(gui.OWComponent):
             (tuple): a list of pens and list of brushes
         """
         color = self.plot_widget.palette().color(OWPalette.Data)
-        pen = [_make_pen(color, 1.5) for _ in range(self.n_points)]
+        pen = [_make_pen(color, 1.5) for _ in range(self.n_shown)]
         if subset is not None:
             brush = [(QBrush(QColor(128, 128, 128, 0)),
                       QBrush(QColor(128, 128, 128, 255)))[s]
                      for s in subset]
         else:
             color = QColor(128, 128, 128, self.alpha_value)
-            brush = [QBrush(color) for _ in range(self.n_points)]
+            brush = [QBrush(color) for _ in range(self.n_shown)]
         return pen, brush
 
     def _get_continuous_colors(self, c_data, subset):
@@ -880,7 +958,7 @@ class OWScatterPlotBase(gui.OWComponent):
         The method calls `self.get_colors`, which in turn calls the widget's
         `get_color_data` to get the indices in the pallette. `get_colors`
         returns a list of pens and brushes to which this method uses to
-        update the colors. Finally, the method triggets the update of the
+        update the colors. Finally, the method triggers the update of the
         legend and the density plot.
         """
         if self.scatterplot_item is None:
@@ -945,21 +1023,21 @@ class OWScatterPlotBase(gui.OWComponent):
         """
         nopen = QPen(Qt.NoPen)
         if self.selection is None:
-            pen = [nopen] * self.n_points
+            pen = [nopen] * self.n_shown
         else:
             sels = np.max(self.selection)
             if sels == 1:
                 pen = np.where(
-                    self.selection,
+                    self._filter_visible(self.selection),
                     _make_pen(QColor(255, 190, 0, 255), SELECTION_WIDTH + 1),
                     nopen)
             else:
                 palette = ColorPaletteGenerator(number_of_colors=sels + 1)
                 pen = np.choose(
-                    self.selection,
+                    self._filter_visible(self.selection),
                     [nopen] + [_make_pen(palette[i], SELECTION_WIDTH + 1)
                                for i in range(sels)])
-        return pen, [QBrush(QColor(255, 255, 255, 0))] * self.n_points
+        return pen, [QBrush(QColor(255, 255, 255, 0))] * self.n_shown
 
     # Labels
     def get_labels(self):
@@ -971,7 +1049,7 @@ class OWScatterPlotBase(gui.OWComponent):
         Returns:
             (labels): a sequence of labels
         """
-        return self.master.get_label_data()
+        return self._filter_visible(self.master.get_label_data())
 
     def update_labels(self):
         """
@@ -981,56 +1059,35 @@ class OWScatterPlotBase(gui.OWComponent):
         `get_label_data`. The obtained labels are shown if the corresponding
         points are selected or if `label_only_selected` is `false`.
         """
-        if self.label_only_selected and self.selection is None:
-            label_data = None
-        else:
-            label_data = self.get_labels()
-        if label_data is None:
-            for label in self.labels:
-                label.setText("")
+        for label in self.labels:
+            self.plot_widget.removeItem(label)
+        if self.scatterplot_item is None \
+                or self.label_only_selected and self.selection is None:
             return
-        if not self.labels:
-            self._create_labels()
+        labels = self.get_labels()
+        if labels is None:
+            return
         black = pg.mkColor(0, 0, 0)
+        x, y = self.scatterplot_item.getData()
         if self.label_only_selected:
-            for label, text, selected \
-                    in zip(self.labels, label_data, self.selection):
-                label.setText(text if selected else "", black)
-        else:
-            for label, text in zip(self.labels, label_data):
-                label.setText(text, black)
-
-    def _create_labels(self):
-        """
-        Create a `TextItem` for each point and store them in `self.labels`
-        """
-        if not self.scatterplot_item:
-            return
-        for x, y in zip(*self.scatterplot_item.getData()):
-            ti = TextItem()
+            selected = np.nonzero(self._filter_visible(self.selection))
+            labels = labels[selected]
+            x = x[selected]
+            y = y[selected]
+        for label, xp, yp in zip(labels, x, y):
+            ti = TextItem(label, black)
+            ti.setPos(xp, yp)
             self.plot_widget.addItem(ti)
-            ti.setPos(x, y)
             self.labels.append(ti)
 
-    def update_label_coords(self, x, y):
-        """
-        Update the coordinates of labels
-
-        The method is currently called exclusively be `update_coordinates`
-
-        Args:
-            x (np.ndarray): x coordinates
-            y (np.ndarray): y coordinates
-        """
+    def _update_label_coords(self, x, y):
+        """Update label coordinates"""
         if self.label_only_selected:
-            if self.selection is not None:
-                for label, selected, xp, yp in zip(
-                        self.labels, self.selection, x, y):
-                    if selected:
-                        label.setPos(xp, yp)
-        else:
-            for label, xp, yp in zip(self.labels, x, y):
-                label.setPos(xp, yp)
+            selected = np.nonzero(self._filter_visible(self.selection))
+            x = x[selected]
+            y = y[selected]
+        for label, xp, yp in zip(self.labels, x, y):
+            label.setPos(xp, yp)
 
     # Shapes
     def get_shapes(self):
@@ -1045,6 +1102,7 @@ class OWScatterPlotBase(gui.OWComponent):
             (np.ndarray): an array of symbols (e.g. o, x, + ...)
         """
         shape_data = self.master.get_shape_data()
+        shape_data = self._filter_visible(shape_data)
         # Data has to be copied so the imputation can change it in-place
         # TODO: Try avoiding this when we move imputation to the widget
         if shape_data is not None:
@@ -1053,7 +1111,7 @@ class OWScatterPlotBase(gui.OWComponent):
         if isinstance(shape_data, np.ndarray):
             shape_data = shape_data.astype(int)
         else:
-            shape_data = np.zeros(self.n_points, dtype=int)
+            shape_data = np.zeros(self.n_shown, dtype=int)
         return self.CurveSymbols[shape_data]
 
     def update_shapes(self):
@@ -1208,10 +1266,10 @@ class OWScatterPlotBase(gui.OWComponent):
 
     def select(self, points):
         # noinspection PyArgumentList
-        if self.n_points == 0:
+        if self.scatterplot_item is None:
             return
         if self.selection is None:
-            self.selection = np.zeros(self.n_points, dtype=np.uint8)
+            self.selection = np.zeros(self.n_valid, dtype=np.uint8)
         indices = [p.data() for p in points]
         keys = QApplication.keyboardModifiers()
         # Remove from selection
@@ -1225,7 +1283,7 @@ class OWScatterPlotBase(gui.OWComponent):
             self.selection[indices] = np.max(self.selection) + 1
         # No modifiers: new selection
         else:
-            self.selection = np.zeros(self.n_points, dtype=np.uint8)
+            self.selection = np.zeros(self.n_valid, dtype=np.uint8)
             self.selection[indices] = 1
         self.update_selection_colors()
         if self.label_only_selected:

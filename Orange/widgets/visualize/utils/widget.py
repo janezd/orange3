@@ -267,7 +267,9 @@ class OWProjectionWidgetBase(OWWidget):
         """Return the column corresponding to label data"""
         if self.attr_label:
             label_data = self.get_column(self.attr_label)
-            return map(formatter or self.attr_label.str_val, label_data)
+            if formatter is None:
+                formatter = self.attr_label.str_val
+            return np.array([formatter(x) for x in label_data])
         return None
 
     def labels_changed(self):

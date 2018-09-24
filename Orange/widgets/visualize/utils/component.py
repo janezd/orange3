@@ -6,7 +6,8 @@ from Orange.widgets.visualize.utils.plotutils import (
     MouseEventDelegate, VizInteractiveViewBox
 )
 
-
+# Maybe this should be in the same file as OWScatterPlotBase?
+# And renamed to OWGraphWithAnchors or something?
 class OWVizGraph(OWScatterPlotBase):
     """Class is used as a graph base class for OWFreeViz and OWRadviz."""
     DISTANCE_DIFF = 0.08
