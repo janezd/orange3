@@ -2,7 +2,6 @@ from enum import IntEnum
 import sys
 
 import numpy as np
-from scipy.spatial import distance
 
 from AnyQt.QtCore import (
     Qt, QObject, QEvent, QRectF, QLineF, QTimer, QPoint,
@@ -16,12 +15,14 @@ import pyqtgraph as pg
 from Orange.data import Table, Domain, StringVariable
 from Orange.projection.freeviz import FreeViz
 from Orange.widgets import widget, gui, settings
-from Orange.widgets.visualize.utils.component import OWVizGraph
+from Orange.widgets.visualize.utils.component import OWGraphWithAnchors
 from Orange.widgets.visualize.utils.plotutils import AnchorItem
-from Orange.widgets.visualize.utils.widget import OWProjectionWidget
+from Orange.widgets.visualize.utils.widget import OWDataProjectionWidget
 from Orange.widgets.widget import Output
 
 
+# TODO: This code is not specific to this widget, is it? Should it be moved
+# to .../.../.../utils/.../.../...?
 class AsyncUpdateLoop(QObject):
     """
     Run/drive an coroutine from the event loop.
@@ -140,75 +141,59 @@ class AsyncUpdateLoop(QObject):
             super().customEvent(event)
 
 
-class OWFreeVizGraph(OWVizGraph):
-    radius = settings.Setting(0)
+class OWFreeVizGraph(OWGraphWithAnchors):
+    hide_radius = settings.Setting(0)
 
-    def __init__(self, scatter_widget, parent):
-        super().__init__(scatter_widget, parent)
-        self._points = []
-        self._point_items = []
+    @property
+    def scaled_radius(self):
+        return self.hide_radius / 100 + 1e-5
 
     def update_radius(self):
-        if self._circle_item is None:
-            return
-
-        r = self.radius / 100 + 1e-5
-        for point, axitem in zip(self._points, self._point_items):
-            axitem.setVisible(np.linalg.norm(point) > r)
-        self._circle_item.setRect(QRectF(-r, -r, 2 * r, 2 * r))
+        self.update_circle()
+        self.update_anchors()
 
     def set_view_box_range(self):
-        self.view_box.setRange(RANGE)
+        self.view_box.setRange(QRectF(-1.05, -1.05, 2.1, 2.1))
 
-    def can_show_indicator(self, pos):
-        if not len(self._points):
-            return False, None
-
-        r = self.radius / 100 + 1e-5
-        mask = np.zeros((len(self._points)), dtype=bool)
-        mask[np.linalg.norm(self._points, axis=1) > r] = True
-        distances = distance.cdist([[pos.x(), pos.y()]], self._points)[0]
-        distances = distances[mask]
+    def closest_draggable_item(self, pos):
+        points, *_ = self.master.get_anchors()
+        if not len(points):
+            return None
+        mask = np.linalg.norm(points, axis=1) > self.scaled_radius
+        xi, yi = points[mask].T
+        distances = (xi - pos.x()) ** 2 + (yi - pos.y()) ** 2
         if len(distances) and np.min(distances) < self.DISTANCE_DIFF:
-            return True, np.flatnonzero(mask)[np.argmin(distances)]
-        return False, None
+            return np.flatnonzero(mask)[np.argmin(distances)]
+        return None
 
-    def _remove_point_items(self):
-        for item in self._point_items:
-            self.plot_widget.removeItem(item)
-        self._point_items = []
+    def update_anchors(self):
+        points, labels = self.master.get_anchors()
+        r = self.scaled_radius
+        if self.anchor_items is None:
+            self.anchor_items = []
+            for point, label in zip(points, labels):
+                anchor = AnchorItem(line=QLineF(0, 0, *point), text=label)
+                anchor.setVisible(np.linalg.norm(point) > r)
+                anchor.setPen(pg.mkPen((100, 100, 100)))
+                self.plot_widget.addItem(anchor)
+                self.anchor_items.append(anchor)
+        else:
+            for anchor, point, label in zip(self.anchor_items, points, labels):
+                anchor.setLine(QLineF(0, 0, *point))
+                anchor.setText(label)
+                anchor.setVisible(np.linalg.norm(point) > r)
 
-    def _add_point_items(self):
-        r = self.radius / 100 + 1e-5
-        for point, var in zip(self._points, self._attributes):
-            axitem = AnchorItem(line=QLineF(0, 0, *point), text=var.name)
-            axitem.setVisible(np.linalg.norm(point) > r)
-            axitem.setPen(pg.mkPen((100, 100, 100)))
-            self.plot_widget.addItem(axitem)
-            self._point_items.append(axitem)
+    def update_circle(self):
+        super().update_circle()
+        r = self.scaled_radius
+        self.circle_item.setRect(QRectF(-r, -r, 2 * r, 2 * r))
 
-    def _add_circle_item(self):
-        if not len(self._points):
-            return
-        r = self.radius / 100 + 1e-5
-        pen = pg.mkPen(QColor(Qt.lightGray), width=1, cosmetic=True)
-        self._circle_item = QGraphicsEllipseItem()
-        self._circle_item.setRect(QRectF(-r, -r, 2 * r, 2 * r))
-        self._circle_item.setPen(pen)
-        self.plot_widget.addItem(self._circle_item)
-
-    def _add_indicator_item(self, point_i):
-        x, y = self._points[point_i]
+    def _add_indicator_item(self, anchor_idx):
+        x, y = self.anchor_items[anchor_idx].get_xy()
         dx = (self.view_box.childGroup.mapToDevice(QPoint(1, 0)) -
               self.view_box.childGroup.mapToDevice(QPoint(-1, 0))).x()
-        self._indicator_item = MoveIndicator(x, y, 600 / dx)
-        self.plot_widget.addItem(self._indicator_item)
-
-
-MAX_ITERATIONS = 1000
-MAX_POINTS = 300
-MAX_INSTANCES = 10000
-RANGE = QRectF(-1.05, -1.05, 2.1, 2.1)
+        self.indicator_item = MoveIndicator(x, y, 600 / dx)
+        self.plot_widget.addItem(self.indicator_item)
 
 
 class InitType(IntEnum):
@@ -219,14 +204,18 @@ class InitType(IntEnum):
         return ["Circular", "Random"]
 
 
-class OWFreeViz(OWProjectionWidget):
+class OWFreeViz(OWDataProjectionWidget):
+    MAX_ITERATIONS = 1000
+    SAMPLE_SIZE = 300
+    MAX_INSTANCES = 10000
+
     name = "FreeViz"
     description = "Displays FreeViz projection"
     icon = "icons/Freeviz.svg"
     priority = 240
     keywords = ["viz"]
 
-    class Outputs(OWProjectionWidget.Outputs):
+    class Outputs(OWDataProjectionWidget.Outputs):
         components = Output("Components", Table)
 
     settings_version = 3
@@ -235,23 +224,22 @@ class OWFreeViz(OWProjectionWidget):
     graph = settings.SettingProvider(OWFreeVizGraph)
     embedding_variables_names = ("freeviz-x", "freeviz-y")
 
-    class Error(OWProjectionWidget.Error):
-        no_class_var = widget.Msg("Need a class variable")
+    class Error(OWDataProjectionWidget.Error):
+        no_class_var = widget.Msg("Data has no target variable")
         not_enough_class_vars = widget.Msg(
-            "Needs discrete class variable with at lest 2 values"
-        )
+            "Target variable is not at least binary")
         features_exceeds_instances = widget.Msg(
-            "Algorithm should not be used when number of features "
-            "exceeds the number of instances."
-        )
-        too_many_data_instances = widget.Msg("Cannot handle so large data.")
+            "Number of features exceeds the number of instances.")
+        too_many_data_instances = widget.Msg("Data is too large.")
         no_valid_data = widget.Msg("No valid data.")
 
     def __init__(self):
         super().__init__()
+
+        # TODO: Can these three attributes be moved to the parent?
+        self.projection = None
         self._X = None
         self._Y = None
-        self._rand_indices = None
 
         # FreeViz
         self._loop = AsyncUpdateLoop(parent=self)
@@ -259,26 +247,27 @@ class OWFreeViz(OWProjectionWidget):
         self._loop.finished.connect(self.__freeviz_finished)
         self._loop.raised.connect(self.__on_error)
 
-        self.graph.view_box.started.connect(self._randomize_indices)
+        self.graph.view_box.started.connect(self._manual_move_start)
         self.graph.view_box.moved.connect(self._manual_move)
-        self.graph.view_box.finished.connect(self._finish_manual_move)
+        self.graph.view_box.finished.connect(self._manual_move_finish)
 
     def _add_controls(self):
         self.__add_controls_start_box()
         super()._add_controls()
         self.graph.gui.add_control(
             self._effects_box, gui.hSlider, "Hide radius:", master=self.graph,
-            value="radius", minValue=0, maxValue=100, step=10,
+            value="hide_radius", minValue=0, maxValue=100, step=10,
             createLabel=False, callback=self.__radius_slider_changed
         )
 
     def __add_controls_start_box(self):
         box = gui.vBox(self.controlArea, box=True)
-        gui.comboBox(box, self, "initialization", label="Initialization:",
-                     items=InitType.items(), orientation=Qt.Horizontal,
-                     labelWidth=90, callback=self.__init_combo_changed)
-        self.btn_start = gui.button(box, self, "Start", self.__toggle_start,
-                                    enabled=False)
+        gui.comboBox(
+            box, self, "initialization", label="Initialization:",
+            items=InitType.items(), orientation=Qt.Horizontal,
+            labelWidth=90, callback=self.__init_combo_changed)
+        self.btn_start = gui.button(
+            box, self, "Start", self.__toggle_start, enabled=False)
 
     def __radius_slider_changed(self):
         self.graph.update_radius()
@@ -292,31 +281,29 @@ class OWFreeViz(OWProjectionWidget):
             self._start()
 
     def __init_combo_changed(self):
+        if self.data is None:
+            return
         running = self._loop.isRunning()
         if running:
             self._loop.cancel()
-        if self.data is not None:
-            self.init_embedding_coords()
-            self.setup_plot()
+        self.init_embedding_coords()
+        self.graph.update_coordinates()
         if running:
             self._start()
 
     def _start(self):
-        """
-        Start the projection optimization.
-        """
         def update_freeviz(anchors):
             while True:
-                projection = FreeViz.freeviz(
+                _, projection, *_ = FreeViz.freeviz(
                     self._X, self._Y, scale=False, center=False,
-                    initial=anchors, maxiter=10
-                )
-                yield projection[0], projection[1]
-                if np.allclose(anchors, projection[1], rtol=1e-5, atol=1e-4):
+                    initial=anchors, maxiter=10)
+                yield projection
+                if np.allclose(anchors, projection, rtol=1e-5, atol=1e-4):
                     return
-                anchors = projection[1]
+                anchors = projection
 
-        self._loop.setCoroutine(update_freeviz(self.graph.get_points()))
+        self.graph.set_sample_size(self.SAMPLE_SIZE)
+        self._loop.setCoroutine(update_freeviz(self.projection))
         self.btn_start.setText("Stop")
         self.progressBarInit()
         self.setBlocking(True)
@@ -324,13 +311,32 @@ class OWFreeViz(OWProjectionWidget):
 
     def __set_projection(self, projection):
         # Set/update the projection matrix and coordinate embeddings
-        self.progressBarAdvance(100. / MAX_ITERATIONS)
-        self._embedding_coords = projection[0]
-        self.graph.set_points(projection[1])
-        self._update_xy()
+        self.progressBarAdvance(100. / self.MAX_ITERATIONS)
+        self.projection = projection
+        self.graph.update_coordinates()
+
+    # TODO: can we move get_anchors, get_embedding and get_coordinates to
+    # the parent? I suppose RadViz - and possibly any other widget - will
+    # have the same computation as FreeViz
+    def get_anchors(self):
+        return self.projection, \
+               [var.name for var in self.data.domain.attributes]
+
+    def get_embedding(self):
+        if self.data is None:
+            return None
+        embedding = np.dot(self._X, self.projection)
+        embedding /= np.max(np.linalg.norm(embedding, axis=1))
+        return embedding
+
+    def get_coordinates(self):
+        embedding = self.get_embedding()
+        if embedding is None:
+            return None
+        return embedding[self.valid_data]
 
     def __freeviz_finished(self):
-        # Projection optimization has finished
+        self.graph.set_sample_size(None)
         self.btn_start.setText("Optimize")
         self.setStatusMessage("")
         self.setBlocking(False)
@@ -340,125 +346,86 @@ class OWFreeViz(OWProjectionWidget):
     def __on_error(self, err):
         sys.excepthook(type(err), err, getattr(err, "__traceback__"))
 
-    def _update_xy(self):
-        coords = self._embedding_coords
-        self._embedding_coords /= np.max(np.linalg.norm(coords, axis=1))
-        self.graph.update_coordinates()
-
+    # TODO: most of clear can probably be moved to the parent, except for
+    # _loop.cancel() and perhaps self.graph.set_sample_size, which belongs here
     def clear(self):
         super().clear()
         self._loop.cancel()
         self._X = None
         self._Y = None
-        self._rand_indices = None
+        self.projection = None
+        self.graph.set_sample_size(None)
+        self.graph.update_coordinates()  # TODO - check
 
-        self.graph.set_attributes(())
-        self.graph.set_points([])
-        #self.graph.update_coordinates()  # TODO - check
-
+    # TODO: most or all of check_data can probably be moved to the parent
     def check_data(self):
         super().check_data()
+        def error(err):
+            err()
+            self.data = None
         if self.data is not None:
-            if self.data.domain.class_var is None:
-                self.Error.no_class_var()
-                self.data = None
-            elif self.data.domain.class_var.is_discrete and \
-                    len(self.data.domain.class_var.values) < 2:
-                self.Error.not_enough_class_vars()
-                self.data = None
+            class_var = self.data.domain.class_var
+            if class_var is None:
+                error(self.Error.no_class_var)
+            elif class_var.is_discrete and len(class_var.values) < 2:
+                error(self.Error.not_enough_class_vars)
             elif len(self.data.domain.attributes) > self.data.X.shape[0]:
-                self.Error.features_exceeds_instances()
-                self.data = None
+                error(self.Error.features_exceeds_instances)
             else:
-                self._prepare_freeviz_data()
-                if self._X is not None:
-                    if len(self._X) > MAX_INSTANCES:
-                        self.Error.too_many_data_instances()
-                        self.data = None
-                    elif np.allclose(np.nan_to_num(self._X - self._X[0]), 0) \
-                            or not len(self._X):
-                        self.Error.no_valid_data()
-                        self.data = None
-                else:
-                    self.Error.no_valid_data()
-                    self.data = None
+                # I don't like having this here, but it's better then calling
+                # _prepare_freeviz_data from here
+                # Preparing normalized data is not a part of data checking
+                self.valid_data = np.all(np.isfinite(self.data.X), axis=1) & \
+                                  np.isfinite(self.data.Y)
+                nvalid = np.sum(self.valid_data)
+                if nvalid > self.MAX_INSTANCES:
+                    error(self.Error.too_many_data_instances)
+                elif nvalid == 0:
+                    error(self.Error.no_valid_data)
         self.btn_start.setEnabled(self.data is not None)
 
+    # TODO: set_data can perhaps be moved to the parent if we rename
+    # _prepare_freeviz_data to _preprocess_data
+    def set_data(self, data):
+        super().set_data(data)
+        if self.data is not None:
+            self._prepare_freeviz_data()
+            self.init_embedding_coords()
+
     def _prepare_freeviz_data(self):
-        valid_mask = np.all(np.isfinite(self.data.X), axis=1) & \
-                     np.isfinite(self.data.Y)
-        X, Y = self.data.X[valid_mask], self.data.Y[valid_mask]
-        if not len(X):
-            self.valid_data = None
+        if not np.any(self.valid_data):
+            self._X = self._Y = self.valid_data = None
             return
 
+        self._X = self.data.X[self.valid_data]
+        self._Y = self.data.Y[self.valid_data]
         if self.data.domain.class_var.is_discrete:
-            Y = Y.astype(int)
-        X = (X - np.mean(X, axis=0))
-        span = np.ptp(X, axis=0)
-        X[:, span > 0] /= span[span > 0].reshape(1, -1)
-        self._X, self._Y, self.valid_data = X, Y, valid_mask
+            self._Y = self._Y.astype(int)
+        self._X -= np.mean(self._X, axis=0)
+        span = np.ptp(self._X, axis=0)
+        self._X[:, span > 0] /= span[span > 0].reshape(1, -1)
 
     def init_embedding_coords(self):
-        points = FreeViz.init_radial(self._X.shape[1]) \
+        self.projection = FreeViz.init_radial(self._X.shape[1]) \
             if self.initialization == InitType.Circular \
             else FreeViz.init_random(self._X.shape[1], 2)
-        self.graph.set_points(points)
-        self.__set_embedding_coords()
 
-    def __set_embedding_coords(self):
-        points = self.graph.get_points()
-        ex = np.dot(self._X, points)
-        self._embedding_coords = (ex / np.max(np.linalg.norm(ex, axis=1)))
+    # TODO: these three methods can perhaps be moved to the parent.
+    # In Radviz, _manual_move would constrain x and y to the circle before
+    # calling the derived method
+    def _manual_move_start(self):
+        self.graph.set_sample_size(self.SAMPLE_SIZE)
 
-    def setup_plot(self):
-        self.graph.set_attributes(self.data.domain.attributes)
-        super().setup_plot()
+    def _manual_move(self, point_i, x, y):
+        self.projection[point_i] = [x, y]
+        self.graph.update_coordinates()
 
-    def _randomize_indices(self):
-        n = len(self._X)
-        if n > MAX_POINTS:
-            self._rand_indices = np.random.choice(n, MAX_POINTS, replace=False)
-            self._rand_indices = sorted(self._rand_indices)
-
-    def _manual_move(self):
-        self.__set_embedding_coords()
-        if self._rand_indices is not None:
-            # save widget state
-            selection = self.graph.selection
-            valid_data = self.valid_data.copy()
-            data = self.data.copy()
-            ec = self._embedding_coords.copy()
-
-            # plot subset
-            self.__plot_random_subset(selection)
-
-            # restore widget state
-            self.graph.selection = selection
-            self.valid_data = valid_data
-            self.data = data
-            self._embedding_coords = ec
-        else:
-            self.graph.update_coordinates()
-
-    def __plot_random_subset(self, selection):
-        self._embedding_coords = self._embedding_coords[self._rand_indices]
-        self.data = self.data[self._rand_indices]
-        self.valid_data = self.valid_data[self._rand_indices]
-        self.graph.reset_graph()
-        if selection is not None:
-            self.graph.selection = selection[self._rand_indices]
-            self.graph.update_selection_colors()
-
-    def _finish_manual_move(self):
-        if self._rand_indices is not None:
-            selection = self.graph.selection
-            self.graph.reset_graph()
-            if selection is not None:
-                self.graph.selection = selection
-                self.graph.select_by_index(self.graph.get_selection())
+    def _manual_move_finish(self, point_i, x, y):
+        self._manual_move(point_i, x, y)
+        self.graph.set_sample_size(None)
         self.commit()
 
+    # Move the following two methods to the parent, too?
     def commit(self):
         super().commit()
         self.send_components()
@@ -469,7 +436,7 @@ class OWFreeViz(OWProjectionWidget):
             meta_attrs = [StringVariable(name='component')]
             domain = Domain(self.data.domain.attributes, metas=meta_attrs)
             metas = np.array([["FreeViz 1"], ["FreeViz 2"]])
-            components = Table(domain, self.graph.get_points().T, metas=metas)
+            components = Table(domain, self.projection.T, metas=metas)
             components.name = self.data.name
         self.Outputs.components.send(components)
 

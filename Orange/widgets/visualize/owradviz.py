@@ -24,7 +24,7 @@ from Orange.widgets.utils.itemmodels import VariableListModel
 from Orange.widgets.utils.plot import VariablesSelection
 from Orange.widgets.visualize.utils.widget import OWDataProjectionWidget
 from Orange.widgets.visualize.utils import VizRankDialog
-from Orange.widgets.visualize.utils.component import OWVizGraph
+from Orange.widgets.visualize.utils.component import OWGraphWithAnchors
 from Orange.widgets.visualize.utils.plotutils import (
     TextItem, VizInteractiveViewBox
 )
@@ -214,7 +214,7 @@ class RadvizInteractiveViewBox(VizInteractiveViewBox):
         QToolTip.showText(point, "{:.2f}".format(np.rad2deg(angle)))
 
 
-class OWRadvizGraph(OWVizGraph):
+class OWRadvizGraph(OWGraphWithAnchors):
     def __init__(self, scatter_widget, parent):
         super().__init__(scatter_widget, parent, RadvizInteractiveViewBox)
         self._text_items = []
@@ -226,15 +226,14 @@ class OWRadvizGraph(OWVizGraph):
     def set_view_box_range(self):
         self.view_box.setRange(RANGE, padding=0.025)
 
-    def can_show_indicator(self, pos):
+    def closest_draggable_item(self, pos):
         if self._points is None:
-            return False, None
-
+            return None
         np_pos = np.array([[pos.x(), pos.y()]])
         distances = distance.cdist(np_pos, self._points[:, :2])[0]
         if len(distances) and np.min(distances) < self.DISTANCE_DIFF:
-            return True, np.argmin(distances)
-        return False, None
+            return np.argmin(distances)
+        return None
 
     def update_items(self):
         super().update_items()
@@ -275,10 +274,10 @@ class OWRadvizGraph(OWVizGraph):
         self._circle_item.setPen(pg.mkPen(QColor(0, 0, 0), width=2))
         self.plot_widget.addItem(self._circle_item)
 
-    def _add_indicator_item(self, point_i):
-        if point_i is None:
+    def _add_indicator_item(self, anchor_idx):
+        if anchor_idx is None:
             return
-        x, y = self._points[point_i][:2]
+        x, y = self._points[anchor_idx][:2]
         col = self.view_box.mouse_state
         dx = (self.view_box.childGroup.mapToDevice(QPoint(1, 0)) -
               self.view_box.childGroup.mapToDevice(QPoint(-1, 0))).x()
