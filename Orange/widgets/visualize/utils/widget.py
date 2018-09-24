@@ -270,6 +270,7 @@ class OWProjectionWidgetBase(OWWidget):
             if formatter is None:
                 formatter = self.attr_label.str_val
             return np.array([formatter(x) for x in label_data])
+            return map(formatter or self.attr_label.str_val, label_data)
         return None
 
     def labels_changed(self):

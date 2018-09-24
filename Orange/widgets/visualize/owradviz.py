@@ -334,6 +334,16 @@ class OWRadviz(OWProjectionWidget):
         self.graph.view_box.moved.connect(self._manual_move)
         self.graph.view_box.finished.connect(self._finish_manual_move)
 
+    def _add_controls(self):
+        self.variables_selection = VariablesSelection(
+            self, self.model_selected, self.model_other, self.controlArea
+        )
+        self.variables_selection.add_remove.layout().addWidget(
+            self.btn_vizrank
+        )
+        super()._add_controls()
+        self.controlArea.layout().removeWidget(self.control_area_stretch)
+
     def vizrank_set_attrs(self, attrs):
         if not attrs:
             return
