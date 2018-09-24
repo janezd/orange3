@@ -7,8 +7,7 @@ from AnyQt.QtCore import (
     Qt, QObject, QEvent, QRectF, QLineF, QTimer, QPoint,
     pyqtSignal as Signal, pyqtSlot as Slot
 )
-from AnyQt.QtGui import QColor
-from AnyQt.QtWidgets import QApplication, QGraphicsEllipseItem
+from AnyQt.QtWidgets import QApplication
 
 import pyqtgraph as pg
 
@@ -326,14 +325,9 @@ class OWFreeViz(OWDataProjectionWidget):
         if self.data is None:
             return None
         embedding = np.dot(self._X, self.projection)
-        embedding /= np.max(np.linalg.norm(embedding, axis=1))
+        embedding /= \
+            np.max(np.linalg.norm(embedding[self.valid_data], axis=1)) or 1
         return embedding
-
-    def get_coordinates(self):
-        embedding = self.get_embedding()
-        if embedding is None:
-            return None
-        return embedding[self.valid_data]
 
     def __freeviz_finished(self):
         self.graph.set_sample_size(None)
@@ -397,13 +391,14 @@ class OWFreeViz(OWDataProjectionWidget):
             self._X = self._Y = self.valid_data = None
             return
 
-        self._X = self.data.X[self.valid_data]
-        self._Y = self.data.Y[self.valid_data]
+        self._X = self.data.X.copy()
+        self._X -= np.nanmean(self._X, axis=0)
+        span = np.ptp(self._X[self.valid_data], axis=0)
+        self._X[:, span > 0] /= span[span > 0].reshape(1, -1)
+
+        self._Y = self.data.Y
         if self.data.domain.class_var.is_discrete:
             self._Y = self._Y.astype(int)
-        self._X -= np.mean(self._X, axis=0)
-        span = np.ptp(self._X, axis=0)
-        self._X[:, span > 0] /= span[span > 0].reshape(1, -1)
 
     def init_embedding_coords(self):
         self.projection = FreeViz.init_radial(self._X.shape[1]) \

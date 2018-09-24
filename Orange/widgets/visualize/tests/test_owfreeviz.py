@@ -83,7 +83,7 @@ class TestOWFreeViz(WidgetTest, WidgetOutputsTestMixin,
         """
         w = self.widget
         self.send_signal(w.Inputs.data, None)
-        self.widget.graph.controls.radius.setSliderPosition(3)
+        self.widget.graph.controls.hide_radius.setSliderPosition(3)
 
     def test_output_components(self):
         self.send_signal(self.widget.Inputs.data, self.data)
