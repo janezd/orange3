@@ -139,9 +139,7 @@ class OWProjectionWidgetBase(OWWidget):
         if attr is None:
             return None
         all_data = self.data.get_column_view(attr)[0]
-        if sp.issparse(all_data):
-            all_data = all_data.toDense()  # TODO -- just guessing; fix this!
-        elif all_data.dtype == object and attr.is_primitive():
+        if all_data.dtype == object and attr.is_primitive():
             all_data = all_data.astype(float)
         if filter_valid and self.valid_data is not None:
             all_data = all_data[self.valid_data]
@@ -373,8 +371,15 @@ class OWProjectionWidgetBase(OWWidget):
         return self.attr_shape == self.attr_color
 
 
-class OWProjectionWidget(OWProjectionWidgetBase):
-    """Base class for projection widgets."""
+class OWDataProjectionWidget(OWProjectionWidgetBase):
+    """
+    Base widget for widgets that get Data and Data Subset (both
+    Orange.data.Table) on the input, and output Selected Data and Data
+    (both Orange.data.Table).
+
+    Beside that the widget displays data as two-dimensional projection
+    of points.
+    """
     class Inputs:
         data = Input("Data", Table, default=True)
         data_subset = Input("Data Subset", Table)
@@ -404,21 +409,8 @@ class OWProjectionWidget(OWProjectionWidgetBase):
         super().__init__()
         self.subset_data = None
         self.subset_indices = None
-        self._embedding_coords = None  # embeddings for valid data
         self.__pending_selection = self.selection
         self.setup_gui()
-
-    @property
-    def embedding_valid_data(self):  # embedding for valid data
-        return self._embedding_coords
-
-    @property
-    def embedding_all_data(self):  # embedding for valid and invalid data
-        if self.data is None:
-            return None
-        embedding = np.zeros((len(self.data), 2), dtype=np.float)
-        embedding[self.valid_data] = self.embedding_valid_data
-        return embedding
 
     # GUI
     def setup_gui(self):
@@ -476,7 +468,6 @@ class OWProjectionWidget(OWProjectionWidgetBase):
 
     def handleNewSignals(self):
         if self.data is not None:
-            self.init_embedding_coords()
             self.setup_plot()
             self.apply_selection()
         self.commit()
@@ -488,18 +479,23 @@ class OWProjectionWidget(OWProjectionWidgetBase):
         return None
 
     # Plot
-    def init_embedding_coords(self):
-        """Setting self._embedding_coords.
-        Should be overridden when subclassed."""
-        x_data = self.data.X
-        x_data[x_data == np.inf] = np.nan
-        x_data = np.nanmean(x_data[self.valid_data], 1)
-        y_data = np.ones(len(x_data))
-        self._embedding_coords = np.vstack((x_data, y_data)).T
+    def get_embedding(self):
+        """A get embedding method.
+
+        Derived classes must override this method. The overridden method
+        should return embedding for all data (valid and invalid). Invalid
+        data embedding coordinates should be set to 0.
+
+        Returns:
+            np.array: Array of embedding coordinates with shape
+            len(self.data) x 2
+        """
+        raise NotImplementedError
 
     def get_coordinates_data(self):
-        return (self._embedding_coords[:, 0], self._embedding_coords[:, 1]) \
-            if self._embedding_coords is not None else (None, None)
+        embedding = self.get_embedding()
+        return embedding[self.valid_data].T[:2] if embedding is not None \
+            else (None, None)
 
     def setup_plot(self):
         self.graph.reset_graph()
@@ -533,13 +529,13 @@ class OWProjectionWidget(OWProjectionWidgetBase):
                                      graph.selection))
 
     def _get_projection_data(self):
-        if self.embedding_all_data is None:
+        if self.data is None or self.embedding_variables_names is None:
             return self.data
         variables = self._get_projection_variables()
         data = self.data.transform(Domain(self.data.domain.attributes,
                                           self.data.domain.class_vars,
                                           self.data.domain.metas + variables))
-        data.metas[:, -2:] = self.embedding_all_data
+        data.metas[:, -2:] = self.get_embedding()
         return data
 
     def _get_projection_variables(self):
@@ -593,8 +589,7 @@ class OWProjectionWidget(OWProjectionWidgetBase):
         self.data = None
         self.valid_data = None
         self.selection = None
-        self._embedding_coords = None
-        self.graph.clear()
+        self.graph.reset_graph()
 
     def onDeleteWidget(self):
         super().onDeleteWidget()
@@ -603,8 +598,15 @@ class OWProjectionWidget(OWProjectionWidgetBase):
 
 
 if __name__ == "__main__":
-    class OWProjectionWidgetWithName(OWProjectionWidget):
+    class OWProjectionWidgetWithName(OWDataProjectionWidget):
         name = "projection"
+
+        def get_embedding(self):
+            x_data = self.data.X
+            x_data[x_data == np.inf] = np.nan
+            x_data = np.nanmean(x_data[self.valid_data], 1)
+            y_data = np.ones(len(x_data))
+            return np.vstack((x_data, y_data)).T
 
     app = QApplication([])
     ow = OWProjectionWidgetWithName()

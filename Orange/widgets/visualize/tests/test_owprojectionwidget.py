@@ -9,11 +9,22 @@ from Orange.data import Table
 from Orange.widgets.tests.base import (
     WidgetTest, WidgetOutputsTestMixin, ProjectionWidgetTestMixin
 )
-from Orange.widgets.visualize.utils.widget import OWProjectionWidget
+from Orange.widgets.visualize.utils.widget import OWDataProjectionWidget
 
 
-class TestOWProjectionWidget(WidgetTest, WidgetOutputsTestMixin,
-                             ProjectionWidgetTestMixin):
+class TestableProjectionWidget(OWDataProjectionWidget):
+    def get_embedding(self):
+        if self.data is None:
+            return None
+        x_data = self.data.X
+        x_data[x_data == np.inf] = np.nan
+        x_data = np.nanmean(x_data[self.valid_data], 1)
+        y_data = np.ones(len(x_data))
+        return np.vstack((x_data, y_data)).T
+
+
+class TestOWDataProjectionWidget(WidgetTest, WidgetOutputsTestMixin,
+                                 ProjectionWidgetTestMixin):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -24,7 +35,7 @@ class TestOWProjectionWidget(WidgetTest, WidgetOutputsTestMixin,
         cls.same_input_output_domain = False
 
     def setUp(self):
-        self.widget = self.create_widget(OWProjectionWidget)
+        self.widget = self.create_widget(TestableProjectionWidget)
 
     def _select_data(self):
         self.widget.graph.select_by_rectangle(
@@ -40,7 +51,8 @@ class TestOWProjectionWidget(WidgetTest, WidgetOutputsTestMixin,
         self.send_signal(self.widget.Inputs.data, self.data)
         self.widget.graph.select_by_index(list(range(0, len(self.data), 10)))
         settings = self.widget.settingsHandler.pack_data(self.widget)
-        w = self.create_widget(OWProjectionWidget, stored_settings=settings)
+        w = self.create_widget(TestableProjectionWidget,
+                               stored_settings=settings)
         self.send_signal(self.widget.Inputs.data, self.data, widget=w)
         np.testing.assert_equal(self.widget.graph.selection, w.graph.selection)
 

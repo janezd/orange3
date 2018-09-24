@@ -1126,7 +1126,7 @@ class OWScatterPlotBase(gui.OWComponent):
         if self.scatterplot_item:
             shape_data = self.get_shapes()
             self.scatterplot_item.setSymbol(shape_data)
-        self.make_legend()
+            self.make_legend()
 
     def update_grid(self):
         """Show or hide the grid"""
