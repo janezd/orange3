@@ -570,7 +570,15 @@ class OWScatterPlotBase(gui.OWComponent):
     def update_tooltip(self, modifiers):
         modifiers &= Qt.ShiftModifier + Qt.ControlModifier + Qt.AltModifier
         text = self.tiptexts.get(int(modifiers), self.tiptexts[0])
-        self.tip_textitem.setHtml(text)
+        warn_jittered = ""
+        if self.jitter_size:
+            warn_jittered = \
+                '<br/><br/>' \
+                '<span style="background-color: red; color: white; ' \
+                'font-weight: 500;">' \
+                '&nbsp;Warning: Selection is applied to unjittered data&nbsp;' \
+                '</span>'
+        self.tip_textitem.setHtml(text + warn_jittered)
 
     # TODO: Rename to remove_plot_items
     def clear(self):
@@ -1245,16 +1253,12 @@ class OWScatterPlotBase(gui.OWComponent):
 
     def select_by_rectangle(self, value_rect):
         if self.scatterplot_item is not None:
-            points = [point
-                      for point in self.scatterplot_item.points()
-                      if value_rect.contains(QPointF(point.pos()))]
-            self.select(points)
-
-    def select_by_index(self, indices):
-        if self.scatterplot_item is not None:
-            points = [point for point in self.scatterplot_item.points()
-                      if point.data() in indices]
-            self.select(points)
+            x0, y0 = value_rect.topLeft().x(), value_rect.topLeft().y()
+            x1, y1 = value_rect.bottomRight().x(), value_rect.bottomRight().y()
+            x, y = self.master.get_coordinates_data()
+            indices = np.flatnonzero(
+                (x0 <= x) & (x <= x1) & (y0 <= y) & (y <= y1))
+            self.select_by_indices(indices.astype(int))
 
     def unselect_all(self):
         if self.selection is not None:
@@ -1271,6 +1275,9 @@ class OWScatterPlotBase(gui.OWComponent):
         if self.selection is None:
             self.selection = np.zeros(self.n_valid, dtype=np.uint8)
         indices = [p.data() for p in points]
+        self.select_by_indices(indices)
+
+    def select_by_indices(self, indices):
         keys = QApplication.keyboardModifiers()
         # Remove from selection
         if keys & Qt.AltModifier:
