@@ -34,9 +34,9 @@ class TestOWScatterPlot(WidgetTest, WidgetOutputsTestMixin,
         self.widget = self.create_widget(OWScatterPlot)
 
     def _compare_selected_annotated_domains(self, selected, annotated):
-        # Base class tests that selected.domain is a subset of annotated.domain
-        # In scatter plot, the two domains are unrelated, so we disable the test
-        pass
+        selected_vars = selected.domain.variables
+        annotated_vars = annotated.domain.variables
+        self.assertLessEqual(set(selected_vars), set(annotated_vars))
 
     def test_set_data(self):
         # Connect iris to scatter plot
@@ -262,7 +262,8 @@ class TestOWScatterPlot(WidgetTest, WidgetOutputsTestMixin,
         self.widget.graph.select_by_rectangle(QRectF(4, 3, 3, 1))
         selected_inds = np.flatnonzero(self.widget.graph.selection)
         settings = self.widget.settingsHandler.pack_data(self.widget)
-        np.testing.assert_equal(selected_inds, [i for i, g in settings["selection_group"]])
+        np.testing.assert_equal(selected_inds,
+                                [i for i, g in settings["selection"]])
 
     def test_points_selection(self):
         # Opening widget with saved selection should restore it
@@ -416,12 +417,13 @@ class TestOWScatterPlot(WidgetTest, WidgetOutputsTestMixin,
         """
         data = Table("iris")
         self.send_signal(self.widget.Inputs.data, data)
-        self.widget.controls.auto_send_selection.setChecked(False)
-        self.assertEqual(False, self.widget.controls.auto_send_selection.isChecked())
+        self.widget.controls.auto_commit.setChecked(False)
+        self.assertFalse(self.widget.controls.auto_commit.isChecked())
         self._select_data()
         self.assertIsNone(self.get_output(self.widget.Outputs.selected_data))
-        self.widget.controls.auto_send_selection.setChecked(True)
-        self.assertIsInstance(self.get_output(self.widget.Outputs.selected_data), Table)
+        self.widget.controls.auto_commit.setChecked(True)
+        output = self.get_output(self.widget.Outputs.selected_data)
+        self.assertIsInstance(output, Table)
 
     def test_color_is_optional(self):
         zoo = Table("zoo")

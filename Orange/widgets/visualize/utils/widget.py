@@ -3,12 +3,12 @@ from xml.sax.saxutils import escape
 from math import log2
 
 import numpy as np
-from scipy import sparse as sp
 
 from AnyQt.QtCore import QSize
 from AnyQt.QtWidgets import QApplication
 
 from Orange.data import Table, ContinuousVariable, Domain, Variable
+from Orange.data.sql.table import SqlTable
 from Orange.statistics.util import bincount
 
 from Orange.widgets import gui, report
@@ -26,7 +26,6 @@ from Orange.widgets.utils.plot import OWPlotGUI
 from Orange.widgets.utils.sql import check_sql_input
 from Orange.widgets.visualize.owscatterplotgraph import OWScatterPlotBase
 from Orange.widgets.widget import OWWidget, Input, Output, Msg
-
 
 MAX_CATEGORIES = 11  # maximum number of colors or shapes (including Other)
 MAX_POINTS_IN_TOOLTIP = 5
@@ -259,6 +258,7 @@ class OWProjectionWidgetBase(OWWidget):
 
     def colors_changed(self):
         self.graph.update_colors()
+        self.cb_class_density.setEnabled(self.can_draw_density())
 
     # Labels
     def get_label_data(self, formatter=None):
@@ -436,17 +436,18 @@ class OWDataProjectionWidget(OWProjectionWidgetBase):
     @Inputs.data
     @check_sql_input
     def set_data(self, data):
+        same_domain = (self.data and data and
+                       data.domain.checksum() == self.data.domain.checksum())
         self.closeContext()
         self.clear()
         self.data = data
         self.check_data()
-        self.init_attr_values()
+        if not same_domain:
+            self.init_attr_values()
         self.openContext(self.data)
         self.cb_class_density.setEnabled(self.can_draw_density())
 
     def check_data(self):
-        """Handle error messages and setting self.valid_data property.
-        Should be overridden most of the times when subclassed."""
         self.clear_messages()
         if self.data is not None:
             if self.data.is_sparse():
@@ -467,9 +468,8 @@ class OWDataProjectionWidget(OWProjectionWidgetBase):
         self.controls.graph.alpha_value.setEnabled(subset is None)
 
     def handleNewSignals(self):
-        if self.data is not None:
-            self.setup_plot()
-            self.apply_selection()
+        self.setup_plot()
+        self.apply_selection()
         self.commit()
 
     def get_subset_mask(self):
@@ -484,7 +484,9 @@ class OWDataProjectionWidget(OWProjectionWidgetBase):
 
         Derived classes must override this method. The overridden method
         should return embedding for all data (valid and invalid). Invalid
-        data embedding coordinates should be set to 0.
+        data embedding coordinates should be set to 0 (in some cases to Nan).
+
+        The method should also sets self.valid_data.
 
         Returns:
             np.array: Array of embedding coordinates with shape
@@ -503,14 +505,22 @@ class OWDataProjectionWidget(OWProjectionWidgetBase):
     # Selection
     def apply_selection(self):
         if self.data is not None and self.__pending_selection is not None:
-            selection = np.array(self.__pending_selection, dtype=np.uint8)
-            self.graph.selection = selection
+            index_group = [(index, group) for index, group in
+                           self.__pending_selection if index < len(self.data)]
+            index_group = np.array(index_group).T
+            selection = np.zeros(self.graph.n_valid, dtype=np.uint8)
+            selection[index_group[0]] = index_group[1]
+
+            self.selection = self.__pending_selection
             self.__pending_selection = None
+            self.graph.selection = selection
             self.graph.update_selection_colors()
 
     def selection_changed(self):
-        graph_sel = self.graph.selection
-        self.selection = list(graph_sel) if graph_sel is not None else None
+        sel = None if self.data and isinstance(self.data, SqlTable) \
+            else self.graph.selection
+        self.selection = [(i, x) for i, x in enumerate(sel) if x] \
+            if sel is not None else None
         self.commit()
 
     # Output
@@ -589,7 +599,6 @@ class OWDataProjectionWidget(OWProjectionWidgetBase):
         self.data = None
         self.valid_data = None
         self.selection = None
-        self.graph.reset_graph()
 
     def onDeleteWidget(self):
         super().onDeleteWidget()
@@ -602,6 +611,8 @@ if __name__ == "__main__":
         name = "projection"
 
         def get_embedding(self):
+            if self.data is None:
+                return None
             x_data = self.data.X
             x_data[x_data == np.inf] = np.nan
             x_data = np.nanmean(x_data[self.valid_data], 1)
