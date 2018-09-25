@@ -167,6 +167,8 @@ class OWFreeVizGraph(OWGraphWithAnchors):
 
     def update_anchors(self):
         points, labels = self.master.get_anchors()
+        if points is None:
+            return
         r = self.scaled_radius
         if self.anchor_items is None:
             self.anchor_items = []
@@ -318,6 +320,8 @@ class OWFreeViz(OWDataProjectionWidget):
     # the parent? I suppose RadViz - and possibly any other widget - will
     # have the same computation as FreeViz
     def get_anchors(self):
+        if self.projection is None:
+            return None, None
         return self.projection, \
                [var.name for var in self.data.domain.attributes]
 
