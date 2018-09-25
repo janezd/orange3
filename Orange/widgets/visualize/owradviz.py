@@ -22,7 +22,7 @@ from Orange.widgets.gui import OWComponent
 from Orange.widgets.settings import Setting, ContextSetting, SettingProvider
 from Orange.widgets.utils.itemmodels import VariableListModel
 from Orange.widgets.utils.plot import VariablesSelection
-from Orange.widgets.visualize.utils.widget import OWProjectionWidget
+from Orange.widgets.visualize.utils.widget import OWDataProjectionWidget
 from Orange.widgets.visualize.utils import VizRankDialog
 from Orange.widgets.visualize.utils.component import OWVizGraph
 from Orange.widgets.visualize.utils.plotutils import (
@@ -290,14 +290,14 @@ RANGE = QRectF(-1.2, -1.05, 2.4, 2.1)
 MAX_POINTS = 100
 
 
-class OWRadviz(OWProjectionWidget):
+class OWRadviz(OWDataProjectionWidget):
     name = "Radviz"
     description = "Display Radviz projection"
     icon = "icons/Radviz.svg"
     priority = 241
     keywords = ["viz"]
 
-    class Outputs(OWProjectionWidget.Outputs):
+    class Outputs(OWDataProjectionWidget.Outputs):
         components = Output("Components", Table)
 
     settings_version = 2
@@ -308,11 +308,11 @@ class OWRadviz(OWProjectionWidget):
     graph = SettingProvider(OWRadvizGraph)
     embedding_variables_names = ("radviz-x", "radviz-y")
 
-    class Warning(OWProjectionWidget.Warning):
+    class Warning(OWDataProjectionWidget.Warning):
         no_features = widget.Msg("At least 2 features have to be chosen")
         invalid_embedding = widget.Msg("No projection for selected features")
 
-    class Error(OWProjectionWidget.Error):
+    class Error(OWDataProjectionWidget.Error):
         no_features = widget.Msg(
             "At least 3 numeric or categorical variables are required"
         )
@@ -357,7 +357,7 @@ class OWRadviz(OWProjectionWidget):
 
     def __model_selected_changed(self):
         self.selected_vars = [var.name for var in self.model_selected]
-        self.init_embedding_coords()
+        self.graph.set_points(None)
         self.setup_plot()
         self.commit()
 
@@ -417,43 +417,43 @@ class OWRadviz(OWProjectionWidget):
             self.model_selected[:] = variables[:5]
             self.model_other[:] = variables[5:] + list(domain.class_vars)
 
-    def init_embedding_coords(self):
-        self.clear_messages()
+    def get_embedding(self):
+        self.valid_data = None
+        if self.data is None:
+            return None
+
+        self.Warning.no_features.clear()
         if len(self.model_selected) < 2:
             self.Warning.no_features()
             self.graph.clear()
-            self._embedding_coords = None
-            return
+            return None
 
-        r = radviz(self.data, self.model_selected)
-        self._embedding_coords = r[0]
+        r = radviz(self.data, self.model_selected, self.graph.get_points())
+        embedding_coords = r[0]
         self.graph.set_points(r[1])
         self.valid_data = r[2]
 
-        if self._embedding_coords is None or \
-                np.any(np.isnan(self._embedding_coords)):
+        self.Warning.invalid_embedding.clear()
+        if embedding_coords is None or np.any(np.isnan(embedding_coords)):
             self.Warning.invalid_embedding()
-            self._embedding_coords = None
+            return None
 
-    def setup_plot(self):
-        if self._embedding_coords is not None:
-            self.graph.reset_graph()
+        embedding = np.zeros((len(self.data), 2), dtype=np.float)
+        embedding[self.valid_data] = embedding_coords
+        return embedding
 
     def _randomize_indices(self):
-        n = len(self._embedding_coords)
+        n = np.sum(self.valid_data)
         if n > MAX_POINTS:
             self._rand_indices = np.random.choice(n, MAX_POINTS, replace=False)
             self._rand_indices = sorted(self._rand_indices)
 
     def _manual_move(self):
-        res = radviz(self.data, self.model_selected, self.graph.get_points())
-        self._embedding_coords = res[0]
         if self._rand_indices is not None:
             # save widget state
             selection = self.graph.selection
             valid_data = self.valid_data.copy()
             data = self.data.copy()
-            ec = self._embedding_coords.copy()
 
             # plot subset
             self.__plot_random_subset(selection)
@@ -462,12 +462,10 @@ class OWRadviz(OWProjectionWidget):
             self.graph.selection = selection
             self.valid_data = valid_data
             self.data = data
-            self._embedding_coords = ec
         else:
             self.graph.update_coordinates()
 
     def __plot_random_subset(self, selection):
-        self._embedding_coords = self._embedding_coords[self._rand_indices]
         self.data = self.data[self._rand_indices]
         self.valid_data = self.valid_data[self._rand_indices]
         self.graph.reset_graph()
@@ -484,6 +482,10 @@ class OWRadviz(OWProjectionWidget):
                 self.graph.select_by_index(self.graph.get_selection())
         self.commit()
 
+    def colors_changed(self):
+        super().colors_changed()
+        self._vizrank_color_change()
+
     def commit(self):
         super().commit()
         self.send_components()
@@ -491,7 +493,7 @@ class OWRadviz(OWProjectionWidget):
     def send_components(self):
         components = None
         if self.data is not None and self.valid_data is not None and \
-                self._embedding_coords is not None:
+                self.get_embedding() is not None:
             points = self.graph.get_points()
             angle = np.arctan2(np.array(points[:, 1].T, dtype=float),
                                np.array(points[:, 0].T, dtype=float))
