@@ -14,6 +14,7 @@ from Orange.widgets.settings import Setting
 from Orange.widgets.utils.sql import check_sql_input
 from Orange.widgets.utils.widgetpreview import WidgetPreview
 from Orange.widgets.widget import Input, Output
+from orangewidget.widget import Msg
 
 
 class OWContinuize(widget.OWWidget):
@@ -29,6 +30,10 @@ class OWContinuize(widget.OWWidget):
 
     class Outputs:
         data = Output("Data", Orange.data.Table)
+
+    class Warning(widget.OWWidget.Warning):
+        no_translation_for_sparse = \
+            Msg("Sparse data can be scaled, but not translated")
 
     want_main_area = False
     buttons_area_orientation = Qt.Vertical
@@ -57,8 +62,8 @@ class OWContinuize(widget.OWWidget):
 
     continuous_treats = (
         ("Leave them as they are", Continuize.Leave),
-        ("Normalize by span", Normalize.NormalizeBySpan),
-        ("Normalize by standard deviation", Normalize.NormalizeBySD))
+        ("Divide by span", Normalize.NormalizeBySpan),
+        ("Divide by standard deviation", Normalize.NormalizeBySD))
 
     class_treats = (
         ("Leave it as it is", Continuize.Leave),
@@ -110,27 +115,19 @@ class OWContinuize(widget.OWWidget):
     @check_sql_input
     def setData(self, data):
         self.data = data
-        self.enable_normalization()
-        if data is None:
-            self.info.set_input_summary(self.info.NoInput)
-            self.info.set_output_summary(self.info.NoOutput)
-            self.Outputs.data.send(None)
+        if data:
+            self.info.set_input_summary(len(self.data))
         else:
-            self.info.set_input_summary(len(data))
-            self.unconditional_commit()
-
-    def enable_normalization(self):
-        enable = not (self.data and self.data.is_sparse())
-        if not enable and self.continuous_treatment in (self.NormalizeBySpan,
-                                                        self.NormalizeBySD):
-            self.continuous_treatment = self.Leave
-        buttons = self.controls.continuous_treatment.buttons
-        buttons[self.NormalizeBySpan].setEnabled(enable)
-        buttons[self.NormalizeBySD].setEnabled(enable)
+            self.info.set_input_summary(self.info.NoInput)
+        self.unconditional_commit()
 
     def constructContinuizer(self):
+        zero_based = self.zero_based
+        if self.data.is_sparse and self.continuous_treatment != self.Leave:
+            self.Warning.no_translation_for_sparse()
+            zero_based = None
         conzer = DomainContinuizer(
-            zero_based=self.zero_based,
+            zero_based=zero_based,
             multinomial_treatment=self.multinomial_treats[self.multinomial_treatment][1],
             continuous_treatment=self.continuous_treats[self.continuous_treatment][1],
             class_treatment=self.class_treats[self.class_treatment][1]
@@ -146,14 +143,17 @@ class OWContinuize(widget.OWWidget):
     #                 else continuizer(data, weightId), data)))
 
     def commit(self):
+        self.Warning.no_translation_for_sparse.clear()
+        if not self.data:
+            self.info.set_output_summary(self.info.NoOutput)
+            self.Outputs.data.send(None)
+            return
+
         continuizer = self.constructContinuizer()
-        if self.data:
-            domain = continuizer(self.data)
-            data = self.data.transform(domain)
-            self.Outputs.data.send(data)
-            self.info.set_output_summary(len(data))
-        else:
-            self.Outputs.data.send(self.data)  # None or empty data
+        domain = continuizer(self.data)
+        data = self.data.transform(domain)
+        self.Outputs.data.send(data)
+        self.info.set_output_summary(len(data))
 
 
     def send_report(self):
@@ -283,7 +283,7 @@ def continuize_var(var,
         if continuous_treatment == Normalize.NormalizeBySpan:
             return [normalize_by_span(var, data_or_dist, zero_based)]
         elif continuous_treatment == Normalize.NormalizeBySD:
-            return [normalize_by_sd(var, data_or_dist)]
+            return [normalize_by_sd(var, data_or_dist, zero_based is None)]
         else:
             return [var]
 
@@ -363,19 +363,23 @@ def normalize_by_span(var, data_or_dist, zero_based=True):
     if span < 1e-15:
         span = 1
 
-    if zero_based:
+    if zero_based is None:
+        return normalized_var(var, 0, 1 / span)
+    elif zero_based:
         return normalized_var(var, v_min, 1 / span)
     else:
         return normalized_var(var, (v_min + v_max) / 2, 2 / span)
 
 
-def normalize_by_sd(var, data_or_dist):
+def normalize_by_sd(var, data_or_dist, sparse):
     dist = _ensure_dist(var, data_or_dist)
     if dist.shape[1] > 0:
         mean, sd = dist.mean(), dist.standard_deviation()
     else:
         mean, sd = 0, 1
     sd = sd if sd > 1e-10 else 1
+    if sparse:
+        mean = 0
     return normalized_var(var, mean, 1 / sd)
 
 
