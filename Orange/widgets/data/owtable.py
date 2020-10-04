@@ -411,6 +411,7 @@ class OWDataTable(OWWidget):
     keywords = []
 
     buttons_area_orientation = Qt.Vertical
+    dist_color_RGB = (220, 220, 220, 255)
 
     class Inputs:
         data = Input("Data", Table, multiple=True)
@@ -420,14 +421,13 @@ class OWDataTable(OWWidget):
         annotated_data = Output(ANNOTATED_DATA_SIGNAL_NAME, Table)
 
     show_distributions = Setting(False)
-    dist_color_RGB = Setting((220, 220, 220, 255))
     show_attribute_labels = Setting(True)
     select_rows = Setting(True)
     auto_commit = Setting(True)
 
     color_by_class = Setting(True)
-    selected_rows = Setting([], schema_only=True)
-    selected_cols = Setting([], schema_only=True)
+    selected_rows: List[int] = Setting([], schema_only=True)
+    selected_cols: List[int] = Setting([], schema_only=True)
 
     def __init__(self):
         super().__init__()

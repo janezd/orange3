@@ -4,7 +4,7 @@ from collections import OrderedDict, namedtuple
 from functools import partial
 from itertools import chain
 from types import SimpleNamespace
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, List, Tuple, Set
 
 import numpy as np
 from AnyQt.QtCore import (
@@ -19,8 +19,8 @@ from orangewidget.settings import IncompatibleContext
 from scipy.sparse import issparse
 
 from Orange.data import (
-    ContinuousVariable, DiscreteVariable, Domain, StringVariable, Table
-)
+    Table, Domain,
+    ContinuousVariable, DiscreteVariable, StringVariable, Variable)
 from Orange.data.util import get_unique_names_duplicates
 from Orange.preprocess import score
 from Orange.widgets import gui, report
@@ -262,12 +262,12 @@ class OWRank(OWWidget, ConcurrentWidgetMixin):
     nSelected = ContextSetting(5)
     auto_apply = Setting(True)
 
-    sorting = Setting((0, Qt.DescendingOrder))
-    selected_methods = Setting(set())
+    sorting: Tuple[int, int] = Setting((0, Qt.DescendingOrder))
+    selected_methods: Set[str] = Setting(set())
 
     settings_version = 3
     settingsHandler = DomainContextHandler()
-    selected_attrs = ContextSetting([], schema_only=True)
+    selected_attrs: List[Variable] = ContextSetting([], schema_only=True)
     selectionMethod = ContextSetting(SelectNBest)
 
     class Information(OWWidget.Information):

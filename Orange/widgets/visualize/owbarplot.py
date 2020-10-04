@@ -335,13 +335,13 @@ class OWBarPlot(OWWidget):
         annotated_data = Output(ANNOTATED_DATA_SIGNAL_NAME, Table)
 
     settingsHandler = DomainContextHandler()
-    selected_var = ContextSetting(None)
-    group_var = ContextSetting(None)
-    annot_var = ContextSetting(None)
-    color_var = ContextSetting(None)
+    selected_var: ContinuousVariable = ContextSetting(None)
+    group_var: DiscreteVariable = ContextSetting(None)
+    annot_var: Variable = ContextSetting(None)
+    color_var: DiscreteVariable = ContextSetting(None)
     auto_commit = Setting(True)
-    selection = Setting(None, schema_only=True)
-    visual_settings = Setting({}, schema_only=True)
+    selection: List[int] = Setting(None, schema_only=True)
+    visual_settings: Dict[KeyType, ValueType] = Setting({}, schema_only=True)
 
     graph = SettingProvider(BarPlotGraph)
     graph_name = "graph.plotItem"

@@ -1,13 +1,14 @@
 """Widget for creating classes from non-numeric attribute by substrings"""
 import re
 from itertools import count
+from typing import List, Dict
 
 import numpy as np
 
 from AnyQt.QtWidgets import QGridLayout, QLabel, QLineEdit, QSizePolicy
 from AnyQt.QtCore import QSize, Qt
 
-from Orange.data import StringVariable, DiscreteVariable, Domain
+from Orange.data import StringVariable, DiscreteVariable, Domain, Variable
 from Orange.data.table import Table
 from Orange.statistics.util import bincount
 from Orange.preprocess.transformation import Transformation, Lookup
@@ -151,9 +152,9 @@ class OWCreateClass(widget.OWWidget):
     want_main_area = False
 
     settingsHandler = DomainContextHandler()
-    attribute = ContextSetting(None)
+    attribute: Variable = ContextSetting(None)
     class_name = ContextSetting("class")
-    rules = ContextSetting({})
+    rules: Dict[str, List[List[str]]] = ContextSetting({})
     match_beginning = ContextSetting(False)
     case_sensitive = ContextSetting(False)
 
