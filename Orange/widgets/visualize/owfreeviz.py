@@ -139,7 +139,7 @@ class OWFreeViz(OWAnchorProjectionWidget, ConcurrentWidgetMixin):
     graph = settings.SettingProvider(OWFreeVizGraph)
 
     class Error(OWAnchorProjectionWidget.Error):
-        no_class_var = widget.Msg("Data has no target variable")
+        no_class_var = widget.Msg("Data must have (single) target variable")
         not_enough_class_vars = widget.Msg(
             "Target variable is not at least binary")
         features_exceeds_instances = widget.Msg(
