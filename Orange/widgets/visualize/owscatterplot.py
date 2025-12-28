@@ -874,5 +874,5 @@ class OWScatterPlot(OWDataProjectionWidget, VizRankMixin(ScatterPlotVizRank)):
 
 if __name__ == "__main__":  # pragma: no cover
     table = Table("iris")
-    WidgetPreview(OWScatterPlot).run(set_data=table,
-                                     set_subset_data=table[:30])
+    WidgetPreview(OWScatterPlot).run(set_data=table)#,
+                                     #set_subset_data=table[:30])
